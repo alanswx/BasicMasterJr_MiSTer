@@ -1,6 +1,7 @@
 set_global_assignment -name VERILOG_FILE rtl/core.v
 set_global_assignment -name VERILOG_FILE rtl/keyboard.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/m6801.sv
+set_global_assignment -name VERILOG_FILE rtl/m6800_pad.v
 set_global_assignment -name VERILOG_FILE rtl/ram.v
 set_global_assignment -name VERILOG_FILE rtl/dpram.v
 set_global_assignment -name VERILOG_FILE rtl/rom.v

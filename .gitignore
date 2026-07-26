@@ -38,3 +38,32 @@ c5_pin_model_dump.txt
 *_netlist
 *.cdf
 **/.DS_Store
+# --- kept locally for research, deliberately not redistributed --------------
+# Third-party source checkouts used only for cross-referencing.
+mame/
+ref/emulators/bm2/
+ref/emulators/common-src-project/
+
+# bm2 itself is a whole third-party emulator; we only ever read it. The pristine
+# upstream tarball is kept instead, and ref/notes/ cites it by file and line.
+ref/emulators/bm2_official/
+
+# Build products of the vendored tape converter.
+ref/emulators/bmtape2/bmtape2/*.o
+ref/emulators/bmtape2/bmtape2/bmtape2
+
+# Scanned manual, factory schematics and mirrored web pages. These are other
+# people's documents; ref/README.md lists where each one came from so anyone
+# can fetch their own copy.
+ref/docs/
+
+# Tape images. Third-party software with unverified redistribution rights (the
+# inufuto games state no licence; the type-ins are magazine listings).
+# software/README.md documents exactly where to download them and how to
+# convert them, and software/bmtape_info.py verifies what you get.
+software/inufuto/
+software/typein/
+
+# Python bytecode
+__pycache__/
+*.pyc

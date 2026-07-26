@@ -184,9 +184,11 @@ assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
 assign HDMI_FREEZE = 0;
 
+// $EE80 bits 5:1 drive a 5-bit R-2R ladder into the speaker amp (IC40 +
+// R36-R45 on the schematic). Unsigned, mono, same level on both channels.
 assign AUDIO_S = 0;
-assign AUDIO_L = 0;
-assign AUDIO_R = 0;
+assign AUDIO_L = {dac_level, 11'd0};
+assign AUDIO_R = {dac_level, 11'd0};
 assign AUDIO_MIX = 0;
 
 assign LED_USER = 0;
@@ -205,7 +207,9 @@ assign VIDEO_ARY = (!ar) ? 12'd3 : 12'd0;
 localparam CONF_STR = {
 	"BasicMasterJr;;",
 	"-;",
-	"F1,Tape,Load;",
+	// The extension field is 3-character extensions concatenated, so "Tape"
+	// was malformed (read as "Tap" plus a stray "e"). Tape images are .bin.
+	"F1,BIN,Load Tape;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -261,17 +265,31 @@ pll pll
 );
 
 
-reg [6:0] div;  // 7 bits for divider 0-73
+// HD46800 CPU clock: 750 kHz (documented; MAME's 754,560 is its own admitted
+// guess). 50 MHz / 750 kHz = 66.667, so a plain divider cannot hit it -- the
+// old /74 ran 10% slow, which is enough to break the monitor's tape timing.
+// Three CPU cycles take exactly 200 clk_sys ticks (67+67+66), giving an exact
+// 750,000 Hz average with at most 20 ns of cycle-to-cycle jitter.
+reg [6:0] div;
+reg [1:0] phase;
+wire [6:0] div_last = (phase == 2'd2) ? 7'd65 : 7'd66;
 wire clk_cpu = div == 7'd0;
 
 always @(posedge clk_sys) begin
-  if (div < 7'd73)
+  if (div < div_last)
     div <= div + 7'd1;
-  else
+  else begin
     div <= 7'd0;
+    phase <= (phase == 2'd2) ? 2'd0 : phase + 2'd1;
+  end
 end
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
+
+// The SDRAM controller must NOT be re-initialised while a tape image is being
+// written into it: `init` forces its state machine back to STATE_STARTUP every
+// cycle it is high, so every byte of the transfer was being thrown away.
+wire sdram_init = RESET | status[0] | buttons[1];
 
 //////////////////////////////////////////////////////////////////
 
@@ -283,19 +301,36 @@ wire key_pressed;
 
 wire adc_cassette_bit;
 wire ce_pix;
+wire break_key;
+wire [4:0] dac_level;
 
 // SDRAM wires for tape loading
 wire [24:0] sdram_addr;
 wire [15:0] sdram_data;
 wire sdram_rd;
 wire sdram_we;
-wire [1:0] sdram_wtbt = 2'b00;
+wire [1:0] sdram_wtbt;   // driven by the cassette module only
 wire sdram_ready;
 wire tape_start;
 wire tape_stop;
 
+// Latch how many bytes the tape image holds, so the player knows where the
+// tape ends instead of running off into whatever else is in SDRAM. Reset the
+// position whenever a new image is mounted.
+reg [24:0] tape_size;
+reg        tape_rewind;
+always @(posedge clk_sys) begin
+  reg old_download;
+  old_download <= ioctl_download;
+  tape_rewind <= 1'b0;
+  if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
+    tape_size <= ioctl_addr + 25'd1;
+  if (old_download & ~ioctl_download)
+    tape_rewind <= 1'b1;
+end
+
 sdram sdram_inst(
-  .init(reset),
+  .init(sdram_init),
   .clk(clk_sys),
   .wtbt(sdram_wtbt),
   .addr(ioctl_download ? ioctl_addr : sdram_addr),
@@ -319,8 +354,17 @@ sdram sdram_inst(
 
 cassette cassette(
   .clk_sys(clk_sys),
+  // Tape bit period: 50 MHz / 300 baud. This is the real rate -- it works
+  // because rtl/m6800_pad.v makes the CPU keep 6800 time. Before that the
+  // monitor's software-timed bit loop ran ~19% fast and this had to be fudged
+  // to 145000. If tapes stop loading, check the CPU timing first
+  // (cd vsim/cputest && make && ./obj_dir/Vcputb --pad).
+  .bit_period(32'd166667),
   .reset(reset),
   .tape_start(tape_start),
+  .tape_stop(tape_stop),
+  .tape_rewind(tape_rewind),
+  .image_size(tape_size),
   .sdram_addr(sdram_addr),
   .sdram_data(sdram_data),
   .sdram_rd(sdram_rd),
@@ -328,7 +372,7 @@ cassette cassette(
   .sdram_wtbt(sdram_wtbt),
   .sdram_ready(sdram_ready),
   .tape_bit(adc_cassette_bit),
-  .tape_bit_stable_out(),
+  .motor(),
   .status()
 );
 
@@ -349,9 +393,11 @@ core core(
   .red(red),
   .green(green),
   .blue(blue),
+  .break_key(break_key),
   .tape_bit(adc_cassette_bit),
   .tape_start(tape_start),
-  .tape_stop(tape_stop)
+  .tape_stop(tape_stop),
+  .dac_level(dac_level)
 );
 
 keyboard keyboard(
@@ -361,6 +407,7 @@ keyboard keyboard(
   .kb_col(kb_col),
   .kb_key(kb_key),
   .kb_mod(kb_mod),
+  .break_key(break_key),
   .status(key_pressed)
 );
 

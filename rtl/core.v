@@ -20,11 +20,16 @@ module core(
   output [7:0] green,
   output [7:0] blue,
 
+  input break_key,       // BREAK key, active high -> NMI when armed
+
   input tape_bit,
   output reg tape_start,
-  output reg tape_stop
+  output reg tape_stop,
 
+  output [4:0] dac_level  // 5-bit R-2R ladder value for the speaker
 );
+
+assign dac_level = dac;
 
 wire [15:0] cpu_addr;
 wire [7:0] cpu_dout;
@@ -52,7 +57,13 @@ wire [7:0] cpu_din =
   rom_sel ? rom_dout :
   ram_sel ? ram_dout : 8'hff;
 
-wire vram_write = cpu_addr >= 16'h100 && cpu_addr < 16'h400;
+// MP-1710 attribute latch: writing $0100-$03FF also stores the current
+// $E890 colour into the parallel attribute RAM, but only on a CPU *write*
+// and only while $E892 bit 0 (色情報書き込み許可 / colour write enable) is set.
+// Reads used to latch too, which let the video scanner scribble over
+// attributes. [bm2 bm2mem.c:77-83]
+wire vram_write = ~cpu_rw & color_board[0]
+               & (cpu_addr >= 16'h100) & (cpu_addr < 16'h400);
 
 wire [15:0] video_ram_addr;
 wire [7:0] video_ram_data;
@@ -72,34 +83,88 @@ video video(
   .char_addr(video_char_addr),
   .ram_data(video_ram_data),
   .char_data(rom0_dout),
-  .color_board(color_board),
+  .color_board(mp1710on),
   .inverted(xor_disp[7]),
-  .charcolor(charcolor[0]),
+  .screen_mode(screen_mode),
+  .charcolor(charcolor),
   .color_ram_addr(cpu_addr - 16'h100),
   .color_ram_wr(vram_write)
 );
 
-reg [3:0] icyc;
+// ---------------------------------------------------------------------------
+// Interrupts
+//
+// IRQ  : ~60 Hz timer, taken from the vertical blank. Disabled while $EFD0
+//        bit 4 is set (bm2 main.c:47-51). The handler acknowledges by reading
+//        $EF40 just before its RTI ($F0B9); the watchdog below is only there so
+//        a program that leaves the line asserted cannot wedge the machine.
+// NMI  : the BREAK key, armed by $EEC0 bit 7.
+// ---------------------------------------------------------------------------
+// NOTE: this all runs on clk_sys, NOT clk_cpu. irq_ack is a single-cycle pulse
+// from the clk_sys I/O decoder, and clk_cpu only ticks once every 67 clk_sys
+// cycles -- sampling the pulse there misses it almost every time, the IRQ never
+// clears, and the CPU lives in the handler. (It does: keyboard input dies.)
 reg irq;
+reg [19:0] irq_age;
 reg old_vs;
-always @(posedge clk_cpu) begin
+wire timer_dis = bank_mode[4];
+wire irq_vector_fetch = cpu_rw & (cpu_addr == 16'hFFF8);
+
+always @(posedge clk_sys) begin
   old_vs <= vs;
-  if (old_vs & ~vs) begin
-    irq <= 1'b1;
+  if (reset) begin
+    irq     <= 1'b0;
+    irq_age <= 20'd0;
   end
-  if (irq) begin
-    icyc <= icyc + 4'd1;
-    if (icyc == 4'd10) begin
-      icyc <= 4'd0;
-      irq <= 1'b0;
+  else begin
+    if (old_vs & ~vs & ~timer_dis) begin
+      irq     <= 1'b1;
+      irq_age <= 20'd0;
+    end
+    else if (irq) begin
+      irq_age <= irq_age + 20'd1;
+      // Drop the line as soon as the CPU commits to the interrupt, i.e. when
+      // it fetches the IRQ vector at $FFF8. Holding it until the handler reads
+      // $EF40 does not work: the ROM does not acknowledge on every path, so a
+      // level-triggered IRQ re-enters immediately after RTI and the foreground
+      // never runs (typing stops dead). bm2 sidesteps this by injecting a
+      // one-shot interrupt rather than driving a level.
+      if (irq_vector_fetch || irq_ack || irq_age == 20'd800000) irq <= 1'b0;
     end
   end
 end
 
+// BREAK key -> NMI, edge triggered, gated by the $EEC0 bit 7 arm bit.
+reg nmi;
+reg old_break;
+always @(posedge clk_sys) begin
+  old_break <= break_key;
+  if (reset) nmi <= 1'b0;
+  else begin
+    if (break_key & ~old_break & kb_nmi_en) nmi <= 1'b1;
+    else if (~kb_nmi_en) nmi <= 1'b0;   // clearing the arm bit clears a pending NMI
+  end
+end
+
+// The CPU core is a 6801; this machine has a 6800. m6800_pad stalls the core
+// so each opcode takes the number of clocks a 6800 would. See rtl/m6800_pad.v.
+wire cpu_cen;
+wire cpu_in_decode;
+wire [7:0] cpu_opcode;
+
+m6800_pad cpu_pad(
+  .clk(clk_cpu),
+  .rst(reset),
+  .cen_in(1'b1),
+  .in_decode(cpu_in_decode),
+  .opcode(cpu_opcode),
+  .cen_out(cpu_cen)
+);
+
 m6801 cpu(
   .clk(clk_cpu),
   .rst(reset),
-  .cen(1'b1),
+  .cen(cpu_cen),
   .rw(cpu_rw),
   .vma(vma),
   .address(cpu_addr),
@@ -107,12 +172,14 @@ m6801 cpu(
   .data_out(cpu_dout),
   .halt(1'b0),
   .halted(),
-  .irq(),
-  .nmi(),
+  .irq(irq),
+  .nmi(nmi),
   .irq_icf(),
   .irq_ocf(),
   .irq_tof(),
-  .irq_sci()
+  .irq_sci(),
+  .in_decode(cpu_in_decode),
+  .cur_opcode(cpu_opcode)
 );
 
 // rom mux
@@ -152,18 +219,33 @@ rom #(.MEMFILE("rome.mem"), .DW(8), .AW(11)) romE(clk_sys, cpu_addr[10:0], romE_
 reg [7:0] xor_disp;
 reg [7:0] charcolor;
 reg [7:0] color_board;
-reg [2:0] bank;
-reg timer_en;
-reg kb_nmi_en;
-wire dbg_tape_read = cpu_addr == 16'hee80;
+reg       mp1710on;     // set once $E892 has been written: colour adapter present
+reg [7:0] bank_mode;    // $EFD0, read back verbatim
+reg [7:0] bckreg;       // $E891, MP-1710 screen background colour
+reg [7:0] screen_mode;  // $EFE0
+reg       kb_nmi_en;
+reg       irq_ack;      // pulses when the handler reads $EF40
+reg [4:0] dac;          // $EE80 bits 5:1 -> 5-bit R-2R ladder
+reg       tape_out;     // $EE80 bit 0 -> tape write
+
+// $EFD0: ---x ---- timer IRQ disable, ---- -x-- $F000 RAM,
+//        ---- --x- $E000 RAM, ---- ---x $B000 RAM
+wire [2:0] bank = bank_mode[2:0];
 
 always @(posedge clk_sys) begin
   io_out <= 8'hff;
   tape_start <= 1'b0;
   tape_stop <= 1'b0;
+  irq_ack <= 1'b0;
   if (reset) begin
     charcolor <= 8'b0000_0111;
     xor_disp <= 8'd0;
+    bank_mode <= 8'd0;      // all three regions ROM, timer IRQ enabled
+    mp1710on <= 1'b0;
+    bckreg <= 8'h70;        // bm2's no-adapter default
+    screen_mode <= 8'd0;
+    dac <= 5'd0;
+    tape_out <= 1'b0;
   end
   else if (io_sel) begin
     case (cpu_addr)
@@ -173,11 +255,18 @@ always @(posedge clk_sys) begin
         else
           charcolor <= cpu_dout;
       end
-      16'he892: begin
+      16'he891: // MP-1710 screen background / border colour
+        if (cpu_rw)
+          io_out <= bckreg;
+        else
+          bckreg <= cpu_dout;
+      16'he892: begin // MP-1710 colour-RAM write enable
         if (cpu_rw)
           io_out <= color_board;
-        else
+        else begin
           color_board <= cpu_dout;
+          mp1710on <= 1'b1;   // any write means the adapter is fitted
+        end
       end
       16'hee00: begin
         io_out <= 1'b1;
@@ -188,24 +277,38 @@ always @(posedge clk_sys) begin
         tape_start <= 1'b1;
       end
       16'hee40: xor_disp <= cpu_dout;
-      16'hee80: // tape read/write
+      // Tape in / tape out + speaker. Reads give the demodulated serial line on
+      // bit 7. Writes latch IC40 (HD74LS174): bit 0 drives the tape output,
+      // bits 5:1 drive a 5-bit R-2R ladder into the speaker amp. [SCH, ROM $F535]
+      16'hee80:
         if (cpu_rw)
           io_out <= { tape_bit, 7'd0 };
-        // else write;
+        else begin
+          tape_out <= cpu_dout[0];
+          dac      <= cpu_dout[5:1];
+        end
       16'heec0: begin // kb
         if (cpu_rw)
           io_out <= { kb_mod, kb_key };
         else
           { kb_nmi_en, kb_col[6:0] } <= cpu_dout;
       end
-      16'hef00: io_out <= 8'hff; //counter; // counter
-      16'hef80: io_out <= 8'h00; // break key?
-      16'hefd0: // ic8[15:12] 1110 ic6[11:6] 111 111 [5] 0 ic13[4:0] 10000
+      // Read-to-clear interrupt acknowledge: the timer handler does
+      // LDAA $EF40 immediately before its RTI at $F0B9.
+      16'hef40: irq_ack <= 1'b1;
+      16'hef00: io_out <= 8'hff; // timer status; bit 7 tested at $F050
+      // Interrupt source flag, bit 7 picks which timer the handler services
+      // ($F0BD). NOT the BREAK key -- that reaches the CPU as an NMI.
+      16'hef80: io_out <= 8'h80;
+      // RAM/ROM bank select + timer enable. cpu_rw HIGH is a read on the 6800;
+      // this used to be the other way round, so writes were ignored and reads
+      // latched bus garbage into the bank register.
+      16'hefd0:
         if (cpu_rw)
-          { timer_en, bank } <= { cpu_dout[4], cpu_dout[2:0] };
+          io_out <= bank_mode;
         else
-          io_out <= bank;
-      16'hefe0: ; // screen mode
+          bank_mode <= cpu_dout;
+      16'hefe0: screen_mode <= cpu_dout;
       default: io_out <= 8'hff;
     endcase
   end

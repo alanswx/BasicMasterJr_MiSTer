@@ -17,7 +17,14 @@ module m6801(
         input  logic        irq_icf,
         input  logic        irq_ocf,
         input  logic        irq_tof,
-        input  logic        irq_sci
+        input  logic        irq_sci,
+
+        // Timing observation for rtl/m6800_pad.v. The core is a 6801 and runs
+        // many opcodes in fewer clocks than the 6800 this machine actually has;
+        // the pad wrapper stalls `cen` to make up the difference, and needs to
+        // know when an opcode has been decoded and which one it is.
+        output logic        in_decode,
+        output logic [7:0]  cur_opcode
 );
 localparam SBIT = 7;
 localparam XBIT = 6;
@@ -116,6 +123,9 @@ nmi_type nmi_ctrl;
 ////////////////////////////////////
 
 always @(posedge clk) halted <= state == halt_state;
+
+assign in_decode  = (state == decode_state);
+assign cur_opcode = op_code;
 
 always_comb
 begin
@@ -2745,7 +2755,15 @@ always @(*)
                      cc_ctrl    = latch_cc;
                          md_ctrl    = fetch_first_md;
                           ea_ctrl    = latch_ea;
-                          next_state = execute_state;
+                          // Was execute_state, which cost one clock more than a
+                          // 6800 takes for the accumulator-B direct/extended ALU
+                          // ops. The accumulator-A arm above is identical and
+                          // goes straight to fetch_state, and fetch_state
+                          // already handles op_code[7:4] == 1100..1111 (the accb
+                          // immediate/direct/indexed/extended arms), so the
+                          // operation still completes there. Verified by
+                          // vsim/cputest.
+                          next_state = fetch_state;
                         end
                         endcase
                       default:

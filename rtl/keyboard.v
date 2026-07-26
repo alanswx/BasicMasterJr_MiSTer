@@ -6,8 +6,12 @@ module keyboard(
   input [3:0] kb_col,
   output reg [3:0] kb_key,
   output reg [3:0] kb_mod,
+  output reg break_key,   // active high; core.v turns this into an NMI
   output reg status
 );
+
+// $EEC0 read bits 7:4, all ACTIVE LOW:
+//   [0] Normal (leaves kana mode)  [1] Shift  [2] Kana Shift  [3] Kana
 
 reg [3:0] keys[15:0];
 
@@ -37,13 +41,19 @@ always @(posedge clk_sys) begin
     keys[14] <= 4'b1111;
     keys[15] <= 4'b1111;
     kb_mod <= 4'b1111;
+    break_key <= 1'b0;
   end
   else begin
 
     case (ps2_key[7:0])
 
       8'h12,
-      8'h59: kb_mod <= { 2'b11, ~status, 1'b1 }; // shift
+      8'h59: kb_mod[1] <= ~status;  // Shift
+      8'h14: kb_mod[0] <= ~status;  // Left Ctrl  -> Normal
+      8'h11: kb_mod[2] <= ~status;  // Left Alt   -> Kana Shift
+      8'h58: kb_mod[3] <= ~status;  // Caps Lock  -> Kana
+
+      8'h76: break_key <= status;   // Esc -> BREAK
 
       8'h1a: keys[0][0] <= ~status; // z
       8'h1c: keys[0][1] <= ~status; // a
@@ -53,11 +63,7 @@ always @(posedge clk_sys) begin
       8'h22: keys[1][0] <= ~status; // x
       8'h1b: keys[1][1] <= ~status; // s
       8'h1d: keys[1][2] <= ~status; // w
-      8'h1e:
-        if (~kb_mod[1])
-          keys[10][2] <= ~status;   // @
-        else
-          keys[1][3] <= ~status;    // 2
+      8'h1e: keys[1][3] <= ~status; // 2
 
       8'h21: keys[2][0] <= ~status; // c
       8'h23: keys[2][1] <= ~status; // d
@@ -77,11 +83,7 @@ always @(posedge clk_sys) begin
       8'h31: keys[5][0] <= ~status; // n
       8'h33: keys[5][1] <= ~status; // h
       8'h35: keys[5][2] <= ~status; // y
-      8'h36:
-        if (~kb_mod[1])
-          keys[11][3] <= ~status;   // ^
-        else
-          keys[5][3] <= ~status;    // 6
+      8'h36: keys[5][3] <= ~status; // 6
 
       8'h3a: keys[6][0] <= ~status; // m
       8'h3b: keys[6][1] <= ~status; // j
@@ -99,30 +101,28 @@ always @(posedge clk_sys) begin
       8'h46: keys[8][3] <= ~status; // 9
 
       8'h4a: keys[9][0] <= ~status; // /
-
-      8'h4c:
-        if (~kb_mod[1])
-          keys[10][1] <= ~status;   // :
-        else
-          keys[9][1] <= ~status;    // ;
-
+      8'h4c: keys[9][1] <= ~status; // ; +
       8'h4d: keys[9][2] <= ~status; // p
       8'h45: keys[9][3] <= ~status; // 0
 
-      8'h2d:
-        if (~kb_mod[1])
-          keys[10][3] <= ~status;   // -
-        else
-          keys[10][0] <= ~status;   // _
+      8'h0e: keys[10][0] <= ~status; // _   (backtick)
+      8'h52: keys[10][1] <= ~status; // : * (apostrophe)
+      8'h4e: keys[10][3] <= ~status; // - = (minus)
 
       8'h29: keys[11][0] <= ~status; // space
       8'h5b: keys[11][1] <= ~status; // ]
-      8'h54: keys[11][2] <= ~status; // [
 
-      //8'h: keys[12][0] <= ~status; // nc?
       8'h5a: keys[12][1] <= ~status; // enter
       8'h66: keys[12][2] <= ~status; // backspace
-      8'h5d: keys[12][3] <= ~status; // \
+
+      // The four cursor keys ARE the @ / [ / ^ / yen keys on this machine --
+      // the arrows are their second function -- so one matrix bit each, and
+      // the PS/2 arrow and numeric-keypad codes are the same byte.
+      8'h75: keys[10][2] <= ~status; // @ / up
+      8'h72: keys[11][2] <= ~status; // [ / down
+      8'h74: keys[11][3] <= ~status; // ^ / right
+      8'h6b: keys[12][3] <= ~status; // yen / left
+      8'h5d: keys[12][3] <= ~status; // yen (JP backslash key)
 
     endcase
 
@@ -130,18 +130,5 @@ always @(posedge clk_sys) begin
 
 end
 
-  // { 0, 0, 0, '!' },
-  // { 0, 0, 0, '"' },
-  // { 0, 0, 0, '#' },
-  // { 0, 0, 0, '$' },
-  // { 0, 0, 0, '%' },
-  // { 0, 0, 0, '&' },
-  // { 0, 0, 0, '\'' },
-  // { '<', 0, 0, '(' },
-  // { '>', 0, 0, ')' },
-  // { '?', 0, 0, 0 },
-  // { 0, '+', 0, '=' },
-  // { 0, 0, 0, 0 },
-  // { 0, 0, 0, 0 }
 
 endmodule
