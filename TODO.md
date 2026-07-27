@@ -42,7 +42,8 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 P0 build/correctness (`sdram_wtbt` double drive, `$EFD0` read/write inversion,
 colour RAM written on reads, 1-bit attribute latch), the whole P1 cassette list,
 the 750 kHz CPU clock, IRQ/NMI, the 5-bit DAC, `$EFE0` mode decode, blink
-attributes and `$E891`, and the keyboard rewrite. Two extra bugs were found and
+attributes and `$E891`, the keyboard rewrite, and default-on 16x fast tape
+loading. Two extra bugs were found and
 fixed along the way:
 
 * **The original external-SDRAM tape path lost or misaligned download bytes.**

@@ -1,6 +1,6 @@
-# Handoff — tape-support branch verified on MiSTer
+# Handoff — fast tape loading verified on MiSTer
 
-Date: 2026-07-26. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
+Date: 2026-07-27. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
 
 ## Current result
 
@@ -12,6 +12,8 @@ The core now works on physical MiSTer hardware:
 - The complete 7,446-byte image reached the FPGA byte-for-byte.
 - MONITOR loaded all 5,560 program bytes at `$1000-$25B7` byte-for-byte.
 - `G 1000 <Space>` started MAZY and reached its `PUSH SPACE KEY` screen.
+- **Fast tape loading** is On by default and completes MAZY in about 15 seconds;
+  the user confirmed the 16x hardware load works perfectly. Off retains 300-baud timing.
 
 The installed test MGL is `/media/fat/.LASTLAUNCH.mgl`; its tape is
 `/media/fat/games/BasicMasterJr/mazy.s.bin`.
@@ -32,7 +34,7 @@ strobe, address/data, and SDRAM handshake did not line up reliably. The final
 path uses a dedicated 64 KiB dual-port block RAM:
 
 - `hps_io` writes port A at full speed.
-- The cassette reads port B at real 300-baud timing.
+- The cassette reads port B at the selected authentic or fast timing.
 - `ioctl_wait` is tied low.
 - `sys/hps_io.sv` asserts `ioctl_wr` in the same cycle as `ioctl_addr` and
   `ioctl_dout`.
@@ -40,6 +42,14 @@ path uses a dedicated 64 KiB dual-port block RAM:
 
 Temporary JTAG source/probe instances used to prove both byte streams were
 removed from the release RTL after validation.
+
+## Fast tape loading
+
+The OSD exposes one compatibility control: **Fast tape loading: On / Off**. On is
+the default. While the cassette motor runs, the CPU clock enable and tape bit rate
+are both multiplied by 16, preserving the monitor timing ratio and all ROM filename,
+block, and checksum handling. The CPU returns to 750 kHz immediately when the motor
+stops. Off restores the original 300-baud tape timing.
 
 ## Hardware validation evidence
 
@@ -64,9 +74,9 @@ Build command:
 
 The clean release build completes with 0 errors and 60 warnings. Twelve additional expected warnings report the deliberately
 idle SDRAM address pins as constant. Its RBF SHA-256 is
-`07126a0f7ccb6381a420085ba6a379715f546e5717899b8331818ed34a38fe3f`. The known
+`531724f7d4fe1b93f356290a24b00f77d36c3c9023df1d27df2854a8c406c6c3`. The known
 critical warning is the existing `clk_sys`/`clk_vid` renderer-memory crossing:
-worst setup slack is -6.208 ns. Both clocks are PLL-derived; this remains an
+worst setup slack is -5.709 ns. Both clocks are PLL-derived; this remains an
 open structural video issue documented in `TODO.md`. It did not prevent stable
 HDMI or tape operation on the tested MiSTer.
 
@@ -77,6 +87,7 @@ cd vsim
 make
 ./regression.sh --no-tape
 ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY
+./tape_test.sh fast ../software/inufuto/mazy.s.bin MAZY
 
 cd cputest
 make

@@ -73,6 +73,7 @@ bool trace_key          = false;
 // "keyboard eats inputs if typed fast" behaviour MAME notes for this machine.
 unsigned int key_hold_cycles = 1500000;   // 30 ms
 unsigned int tape_bit_period = 166667;   // 50 MHz / 300 baud, the real rate
+bool fast_tape = true;
 int  stop_at_frame      = -1;
 std::vector<int> screenshot_frames;
 std::string tape_image;
@@ -522,6 +523,7 @@ static void usage(const char* argv0)
 	"  --key-hold MS              how long to hold each injected key (default 30 ms)\n"
 	"  --tape-baud N              tape bit rate (default 300)\n"
 	"  --tape-bit-period N        tape bit period in clk_sys ticks (overrides --tape-baud)\n"
+	"  --fast-tape on|off         16x motor-active loading (default on)\n"
 	"  -h, --help                 this text\n"
 	"\n"
 	"Run from the vsim/ directory: the ROM .mem files are opened relative to cwd.\n",
@@ -548,6 +550,12 @@ int main(int argc, char** argv, char** env)
 		else if (a == "--key-hold")          key_hold_cycles = (unsigned)(atof(next("--key-hold").c_str()) * 50000.0);
 		else if (a == "--tape-baud")         tape_bit_period = (unsigned)(50000000.0 / atof(next("--tape-baud").c_str()));
 		else if (a == "--tape-bit-period")   tape_bit_period = (unsigned)atoi(next("--tape-bit-period").c_str());
+		else if (a == "--fast-tape") {
+			std::string value = next("--fast-tape");
+			if      (value == "on")  fast_tape = true;
+			else if (value == "off") fast_tape = false;
+			else { printf("--fast-tape wants on or off\n"); return 1; }
+		}
 		else if (a == "--tape")              tape_image = next("--tape");
 		else if (a == "--screenshot-name")   screenshot_name = next("--screenshot-name");
 		else if (a == "--stop-at-frame")     stop_at_frame = atoi(next("--stop-at-frame").c_str());
@@ -636,6 +644,7 @@ int main(int argc, char** argv, char** env)
 	input.ps2_key      = &top->ps2_key;
 	input.keyEventWait = key_hold_cycles;
 	top->tape_bit_period = tape_bit_period;
+	top->fast_tape = fast_tape;
 
 	if (!tape_image.empty()) {
 		printf("Loading tape image: %s\n", tape_image.c_str());

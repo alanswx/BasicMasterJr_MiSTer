@@ -5,6 +5,7 @@
 #   ./tape_test.sh                          first block of mazy (~2.5 min)
 #   ./tape_test.sh block <image> <name>     first block of any image
 #   ./tape_test.sh full  <image> <name>     whole image, then run it (~30 min)
+#   ./tape_test.sh fast  <image> <name>     first block at the default 16x rate
 #
 # The load address is read out of the tape image, not assumed: different titles
 # load to different places (MAZY at $1000, most of the rest at $2200), and
@@ -45,16 +46,17 @@ PY
 [ -n "$base" ] || { echo "FAIL: $image has no binary blocks to check" >&2; exit 1; }
 
 case "$mode" in
-	full)  dump_len=600; dump_frame=14500; stop=15410
+	full)  dump_len=600; dump_frame=14500; stop=15410; fast_tape=off
 	       extra=(--send-keys '14600:G' --send-keys "14700:$base" --send-keys '14800: ' --screenshot 15400) ;;
-	block) dump_len=100; dump_frame=1300;  stop=1310; extra=() ;;
-	*)     echo "usage: $0 [block|full] [image] [name]" >&2; exit 1 ;;
+	block) dump_len=100; dump_frame=1300;  stop=1310; fast_tape=off; extra=() ;;
+	fast)  dump_len=100; dump_frame=600;   stop=610;  fast_tape=on;  extra=() ;;
+	*)     echo "usage: $0 [block|full|fast] [image] [name]" >&2; exit 1 ;;
 esac
 
 rm -f memdump_*.bin
 [ -n "${QUIET:-}" ] || echo "Loading $image as $name at \$$base ($mode) ..."
 
-"$EXE" --headless --tape "$image" \
+"$EXE" --headless --tape "$image" --fast-tape "$fast_tape" \
        --send-keys '75:MON\n' --send-keys '200:L' --send-keys "260:$name" --send-keys '340: ' \
        --dump-mem "$base:$dump_len@$dump_frame" \
        --stop-at-frame "$stop" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1

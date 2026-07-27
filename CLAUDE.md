@@ -53,7 +53,8 @@ make clean
 
 Useful flags: `--trace-cpu` (every bus cycle), `--trace-io` (`$E800-$EFFF` accesses,
 timestamped), `--trace-tape`, `--trace-key`, `--key-hold MS`, `--tape-baud N`,
-`--screenshot-name <path>`, and three that make debugging much cheaper:
+`--screenshot-name <path>`, `--fast-tape on|off`, and three that make
+debugging much cheaper:
 
 * `--watch-pc F762,F766` — count bus accesses to given addresses. The fastest way to
   tell which branch of a ROM routine is actually being taken.
@@ -81,6 +82,7 @@ cd vsim/
 ./regression.sh --bless      # accept current screenshots as the new golden
 
 ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY   # whole tape + run it (~30 min)
+./tape_test.sh fast ../software/inufuto/mazy.s.bin MAZY   # first block at default 16x
 ```
 
 The tape stage is functional, not visual: it loads a real image through the monitor
@@ -122,8 +124,10 @@ Entry is `$2200` for everything except MAZY (`$1000`). Details and provenance in
 Loading works: `./tape_test.sh` checks a block byte-for-byte, `./tape_test.sh full`
 loads all of MAZY and runs it.
 
-Tape images must fit in the 64 KiB on-chip buffer. Tape runs at the real 300 baud
-(`.bit_period` = 166667). That only works because
+Tape images must fit in the 64 KiB on-chip buffer. **Fast tape loading** defaults
+to On and multiplies both CPU and tape rates by 16 only while the cassette motor
+is active, preserving the ROM loader's 2500 CPU cycles per bit. Set it Off for
+the real 300-baud rate (`.bit_period` = 166667). That only works because
 `rtl/m6800_pad.v` makes the CPU keep 6800 time — see below. If tapes stop loading,
 check CPU timing first.
 

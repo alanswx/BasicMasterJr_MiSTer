@@ -21,6 +21,7 @@ module emu (
 
 	// clk_sys ticks per tape bit; --tape-bit-period sweeps this from sim_main
 	input      [31:0] tape_bit_period,
+	input             fast_tape,
 
 	// HPS file transfer (tape images) -- driven by sim/sim_bus.cpp
 	input             ioctl_download,
@@ -90,21 +91,17 @@ always @(posedge clk_sys) begin
 	if (vid_acc + VID_INC < vid_acc) clk_vid <= ~clk_vid;  // carry out => toggle
 end
 
-// CPU clock enable -- identical to BasicMasterJr.sv. core.v runs the CPU on
-// clk_sys and uses clk_cpu as a clock enable, so this is a one-tick-in-67 pulse.
-// 3 CPU cycles = 200 clk_sys ticks => exactly 750,000 Hz on average.
-reg [6:0] div = 7'd0;
-reg [1:0] phase = 2'd0;
-wire [6:0] div_last = (phase == 2'd2) ? 7'd65 : 7'd66;
-wire clk_cpu = (div == 7'd0);
+// CPU clock enable and default-on fast tape loading, matching BasicMasterJr.sv.
+wire tape_motor;
+wire [31:0] cpu_increment = tape_motor && fast_tape
+	? (32'd64_424_509 << 4)
+	: 32'd64_424_509;
+reg [31:0] cpu_acc = 32'd0;
+wire [32:0] cpu_sum = {1'b0, cpu_acc} + {1'b0, cpu_increment};
+wire clk_cpu = cpu_sum[32];
 
-always @(posedge clk_sys) begin
-	if (div < div_last) div <= div + 7'd1;
-	else begin
-		div <= 7'd0;
-		phase <= (phase == 2'd2) ? 2'd0 : phase + 2'd1;
-	end
-end
+always @(posedge clk_sys)
+	cpu_acc <= cpu_sum[31:0];
 
 assign dbg_cpu_ce = clk_cpu;
 
@@ -140,7 +137,6 @@ wire        ce_pix;
 wire        tape_bit;
 wire        tape_start;
 wire        tape_stop;
-wire        tape_motor;
 wire        break_key;
 wire  [4:0] dac_level;
 
@@ -159,7 +155,9 @@ end
 
 cassette cassette (
 	.clk_sys     (clk_sys),
-	.bit_period  (tape_bit_period),
+	.bit_period  (tape_motor && fast_tape
+	              ? ((tape_bit_period + 32'd8) >> 4)
+	              : tape_bit_period),
 	.reset       (reset),           // NOT core_reset: a tape mount must not rewind twice
 	.tape_start  (tape_start),
 	.tape_stop   (tape_stop),

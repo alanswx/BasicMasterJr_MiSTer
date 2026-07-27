@@ -211,6 +211,8 @@ localparam CONF_STR = {
 	// was malformed (read as "Tap" plus a stray "e"). Tape images are .bin.
 	"F1,BIN,Load Tape;",
 	"-;",
+	"O[118],Fast tape loading,On,Off;",
+	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
 	"T[0],Reset;",
@@ -265,24 +267,21 @@ pll pll
 );
 
 
-// HD46800 CPU clock: 750 kHz (documented; MAME's 754,560 is its own admitted
-// guess). 50 MHz / 750 kHz = 66.667, so a plain divider cannot hit it -- the
-// old /74 ran 10% slow, which is enough to break the monitor's tape timing.
-// Three CPU cycles take exactly 200 clk_sys ticks (67+67+66), giving an exact
-// 750,000 Hz average with at most 20 ns of cycle-to-cycle jitter.
-reg [6:0] div;
-reg [1:0] phase;
-wire [6:0] div_last = (phase == 2'd2) ? 7'd65 : 7'd66;
-wire clk_cpu = div == 7'd0;
+// HD46800 CPU clock enable. The base increment is
+// round(750 kHz / 50 MHz * 2^32). With fast tape loading enabled (the default),
+// the cassette motor multiplies both this enable rate and the tape baud rate by
+// 16, preserving the monitor ROM's 2500 CPU cycles per tape bit.
+wire tape_motor;
+wire fast_tape_loading = ~status[118];
+wire [31:0] cpu_increment = tape_motor && fast_tape_loading
+                          ? (32'd64_424_509 << 4)
+                          : 32'd64_424_509;
+reg [31:0] cpu_acc = 32'd0;
+wire [32:0] cpu_sum = {1'b0, cpu_acc} + {1'b0, cpu_increment};
+wire clk_cpu = cpu_sum[32];
 
-always @(posedge clk_sys) begin
-  if (div < div_last)
-    div <= div + 7'd1;
-  else begin
-    div <= 7'd0;
-    phase <= (phase == 2'd2) ? 2'd0 : phase + 2'd1;
-  end
-end
+always @(posedge clk_sys)
+  cpu_acc <= cpu_sum[31:0];
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
@@ -309,6 +308,8 @@ wire [4:0] dac_level;
 wire [24:0] cassette_sdram_addr;
 wire tape_start;
 wire tape_stop;
+wire [31:0] tape_bit_period =
+  tape_motor && fast_tape_loading ? 32'd10417 : 32'd166667;
 
 // The tape image lives in a dedicated dual-port 64 KiB block RAM. hps_io
 // writes one port at full speed while the cassette reads the other, avoiding
@@ -374,7 +375,7 @@ cassette cassette(
   // monitor's software-timed bit loop ran ~19% fast and this had to be fudged
   // to 145000. If tapes stop loading, check the CPU timing first
   // (cd vsim/cputest && make && ./obj_dir/Vcputb --pad).
-  .bit_period(32'd166667),
+  .bit_period(tape_bit_period),
   .reset(reset),
   .tape_start(tape_start),
   .tape_stop(tape_stop),
@@ -387,7 +388,7 @@ cassette cassette(
   .sdram_wtbt(),
   .sdram_ready(1'b1),
   .tape_bit(adc_cassette_bit),
-  .motor(),
+  .motor(tape_motor),
   .status()
 );
 

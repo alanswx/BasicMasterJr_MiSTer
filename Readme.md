@@ -48,8 +48,11 @@ G 1000     <Space>       run it, from the program's entry address
 The **Space, not Return** terminator is real — it is how the monitor works, and it
 trips up everyone (MAME's driver notes it too). Type `L`, then the name, then Space.
 
-Loading is real-time: MAZY's 7,446-byte image takes about four minutes at 300
-baud, just as it did on the original machine. The screen lists blocks as they load;
+**Fast tape loading** defaults to On in the OSD. It accelerates the CPU and serial
+tape together by 16x only while the cassette motor is running, so the ROM still
+performs its normal filename, block and checksum processing. MAZY's 7,446-byte
+image takes roughly 15 seconds. Set **Fast tape loading** to Off for the original
+300-baud timing (about four minutes). The screen lists blocks as they load;
 `* ERROR` means the monitor rejected a command or detected bad tape data.
 
 BASIC programs (saved as ASCII, extension `.S` in the tape header) load with BASIC's
