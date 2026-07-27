@@ -40,7 +40,6 @@ module sdram
    output            SDRAM_nRAS,
    output            SDRAM_nCAS,
    output            SDRAM_CKE,
-   output            SDRAM_CLK,
 
    input       [1:0] wtbt,
    input      [24:0] addr,

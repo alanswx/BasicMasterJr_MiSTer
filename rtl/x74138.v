@@ -8,7 +8,7 @@ module x74138(
 );
 
 always @*
-  if (~G2B & ~G2A & G1) Y = ~(1<<A);
+  if (~G2B & ~G2A & G1) Y = ~(8'b1 << A);
   else Y = 8'b11111111;
 
 endmodule

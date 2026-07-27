@@ -72,13 +72,15 @@ Build command:
 ~/intelFPGA_lite/quartus/bin/quartus_sh --flow compile BasicMasterJr
 ```
 
-The clean release build completes with 0 errors and 60 warnings. Twelve additional expected warnings report the deliberately
-idle SDRAM address pins as constant. Its RBF SHA-256 is
-`531724f7d4fe1b93f356290a24b00f77d36c3c9023df1d27df2854a8c406c6c3`. The known
-critical warning is the existing `clk_sys`/`clk_vid` renderer-memory crossing:
-worst setup slack is -5.709 ns. Both clocks are PLL-derived; this remains an
-open structural video issue documented in `TODO.md`. It did not prevent stable
-HDMI or tape operation on the tested MiSTer.
+The timing-clean release build completes with 0 errors and 53 warnings. TimeQuest
+passes with +0.527 ns worst setup slack and +0.201 ns worst hold slack. The system
+and video PLL outputs are declared asynchronous, matching the explicit two-flop
+synchronizers and true dual-clock framebuffer at their boundaries. The RBF SHA-256
+is `da8ad7bc64f9c883597d140894a680ca7ebbb56a2e5553f2b7e4d7c744970a46`.
+
+The remaining warnings are benign MiSTer/Quartus artifacts: inferred-ROM write
+pins, generated PLL nodes optimized away, deliberately idle SDRAM/ADC pins,
+SD/USER_IO output enables, LogicLock Lite licensing, and broad fast-I/O assignments.
 
 ## Verification commands
 
@@ -99,6 +101,11 @@ external-SDRAM tape path. Tape images are limited to 64 KiB.
 
 ## Remaining work
 
-The open functional items are unchanged and tracked in `TODO.md`: graphics-mode
-scanline interleave, one-cycle-long extended `JMP`, tape saving, and structural
-video-domain cleanup. No commit should claim those are fixed.
+The timing-passing RBF is installed as `/media/fat/BasicMasterJr.rbf`; the prior
+release is recoverable as `/media/fat/BasicMasterJr.pre-timing-cleanup.rbf`. mRExt
+launched `.LASTLAUNCH.mgl` and `/tmp/CORENAME` reports `BasicMasterJr`. Its screenshot
+API returned an empty record, so this build still needs a human HDMI visual check.
+
+Open functional work is tracked in `TODO.md`: one-cycle-long extended `JMP`, tape
+saving, printer/expansion hardware, MP-1803 floppy, MP-9730 1200-baud tape, visible
+MP-1710 border color, and confirmation of the real mixed text/graphics behavior.

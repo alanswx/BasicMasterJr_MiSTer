@@ -22,13 +22,6 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 
 ## P0 — open
 
-- [ ] **Graphics-mode scanline interleave is wrong** (`rtl/video.v`). Mode select,
-      page base and horizontal mapping are all correct and bitmap data renders,
-      but vertical placement is off: poking `$2100`/`$2120`/`$2200` on page 2 puts
-      full scanlines at y=0 and y=7 instead of y=0, y=1 and y=8. Deterministic
-      repro in the task notes; suspect the renderer pipeline (the graphics path
-      uses `ram_data` one state earlier than the text path uses `char_data`).
-
 - [ ] **`JMP` extended (`$7E`) runs 1 clock long.** The only remaining cycle
       inaccuracy: 4 clocks against the 6800's 3. `rtl/m6800_pad.v` can add clocks
       but not remove them, so this needs the same kind of state-machine fix that
@@ -43,8 +36,15 @@ P0 build/correctness (`sdram_wtbt` double drive, `$EFD0` read/write inversion,
 colour RAM written on reads, 1-bit attribute latch), the whole P1 cassette list,
 the 750 kHz CPU clock, IRQ/NMI, the 5-bit DAC, `$EFE0` mode decode, blink
 attributes and `$E891`, the keyboard rewrite, and default-on 16x fast tape
-loading. Two extra bugs were found and
+loading. Three extra bugs were found and
 fixed along the way:
+
+* **The renderer clock-domain crossing and graphics pipeline were rebuilt.** The
+  character renderer now runs with system RAM and the character ROM on `clk_sys`,
+  waits for both synchronous read latencies, and writes a true dual-clock M10K
+  framebuffer scanned by `clk_vid`. This removes the two failing CDC paths and
+  fixes the one-request-early graphics scanline data. Quartus now passes setup
+  and hold timing.
 
 * **The original external-SDRAM tape path lost or misaligned download bytes.**
   Tape images now download into a dedicated 64 KiB dual-port block RAM, and
@@ -55,21 +55,26 @@ fixed along the way:
   also passing shift to the machine, so `:` `@` `=` `^` `_` could never be typed.
   `rtl/keyboard.v` now maps one PS/2 key per matrix position.
 
+## Unimplemented or incomplete hardware features
+
+- [ ] **Tape saving/output.** `$EE80` bit 0 is documented but ignored; there is no
+      upload path that writes a saved tape image back to MiSTer.
+- [ ] **Printer output and expansion PIA.** The printer ROM is now readable, but
+      `$E800-$E803` printer/PIA behavior and actual output are not implemented.
+- [ ] **MP-1803 floppy adapter** and **MP-9730 1200-baud cassette** support. Neither
+      MAME nor bm2 emulates these fully; `bmtape2` is the reference for the 1200-baud
+      tape format.
+- [ ] **Visible MP-1710 border/background color.** `$E891` stores and reads back
+      the value, but the renderer does not yet use `bckreg` outside the 256x192 image.
+- [ ] **Authentic mixed text+graphics composition.** `$40-$4F` is supported using
+      bm2's alternating-frame approximation; the real hardware overlay/interlace
+      behavior remains unresolved.
+
 ## P4 — smaller / structural
 
 - [ ] `$E800-$EDFF` is unconditionally I/O in `core.v:48`. bm2 agrees; MAME makes it
       RAM when the printer view is off. Low risk either way — noted so nobody
       "fixes" it toward MAME without reading `ref/notes/mame-vs-bm2-verdicts.md`.
-
-- [ ] `vma` is ignored: `core.v:104` connects it to an undeclared implicit wire and
-      RAM writes (`ram.v` → `wren_a(wr)`) are not gated by it.
-
-- [ ] `key_pressed` is an input to `core.v` that nothing uses.
-
-- [ ] `video.v` renders into a full 256×192×3-bit framebuffer scanned asynchronously
-      from the CPU. It works, but it is expensive, and the renderer pipeline is what
-      the graphics-mode interleave bug lives in. The colour RAM is also written from
-      the CPU clock domain and read in the video domain with no synchroniser.
 
 - [ ] `wav2cas.py` has three different sample rates in one file (docstring 19200,
       function default 8000, `main()` default 19200). Settle it once the RTL rate is

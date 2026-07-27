@@ -557,6 +557,7 @@ sysmem_lite sysmem
 
 	//DE10-nano has no reset signal on GPIO, so core has to emulate cold reset button.
 	.reset_hps_cold_req(btn_r),
+	.reset_hps_warm_req(1'b0),
 
 	//64-bit DDR3 RAM access
 	.ram1_clk(ram_clk),
@@ -683,7 +684,7 @@ ascal
 ascal
 (
 	.reset_na (~reset_req),
-	.run      (1),
+	.run      (1'b1),
 	.freeze   (freeze),
 
 	.i_clk    (clk_ihdmi),
@@ -695,11 +696,13 @@ ascal
 	.i_vs     (hvs_fix),
 	.i_fl     (f1),
 	.i_de     (hde_emu),
-	.iauto    (1),
-	.himin    (0),
-	.himax    (0),
-	.vimin    (0),
-	.vimax    (0),
+	.iauto    (1'b1),
+	.himin    (12'd0),
+	.himax    (12'd0),
+	.vimin    (12'd0),
+	.vimax    (12'd0),
+	.i_hdmax  (),
+	.i_vdmax  (),
 
 	.o_clk    (clk_hdmi),
 	.o_ce     (scaler_out),
@@ -725,7 +728,9 @@ ascal
 	.vmin     (vmin),
 	.vmax     (vmax),
 
-	.mode     ({~lowlat,LFB_EN ? LFB_FLT : |scaler_flt,2'b00}),
+	.mode     ({1'b0, ~lowlat, LFB_EN ? LFB_FLT : |scaler_flt, 2'b00}),
+	.format   (2'b01),
+	.o_border (24'd0),
 	.poly_clk (clk_sys),
 	.poly_a   (coef_addr),
 	.poly_dw  (coef_data),
@@ -735,6 +740,7 @@ ascal
 	.pal1_dw  (pal_d),
 	.pal1_a   (pal_a),
 	.pal1_wr  (pal_wr),
+	.pal1_dr  (),
 
 `ifdef MISTER_FB
 	`ifdef MISTER_FB_PALETTE
@@ -812,7 +818,8 @@ always @(posedge clk_vid) fb_vbl <= hdmi_vbl;
 reg  ar_md_start;
 wire ar_md_busy;
 reg  [11:0] ar_md_mul1, ar_md_mul2, ar_md_div;
-wire [11:0] ar_md_res;
+wire [23:0] ar_md_res_full;
+wire [11:0] ar_md_res = ar_md_res_full[11:0];
 
 sys_umuldiv #(12,12,12) ar_muldiv
 (
@@ -823,7 +830,8 @@ sys_umuldiv #(12,12,12) ar_muldiv
 	.mul1(ar_md_mul1),
 	.mul2(ar_md_mul2),
 	.div(ar_md_div),
-	.result(ar_md_res)
+	.result(ar_md_res_full),
+	.remainder()
 );
 
 reg [11:0] hmin;
@@ -1013,7 +1021,7 @@ pll_cfg pll_cfg
 	.mgmt_clk(FPGA_CLK1_50),
 	.mgmt_reset(reset_req),
 	.mgmt_waitrequest(cfg_waitrequest),
-	.mgmt_read(0),
+	.mgmt_read(1'b0),
 	.mgmt_readdata(),
 	.mgmt_write(cfg_write),
 	.mgmt_address(cfg_address),
@@ -1140,7 +1148,8 @@ osd hdmi_osd
 	.dout(hdmi_data_osd),
 	.hs_out(hdmi_hs_osd),
 	.vs_out(hdmi_vs_osd),
-	.de_out(hdmi_de_osd)
+	.de_out(hdmi_de_osd),
+	.osd_status()
 );
 `endif
 
@@ -1303,7 +1312,8 @@ osd vga_osd
 
 	.dout(vga_data_osd),
 	.hs_out(vga_hs_osd),
-	.vs_out(vga_vs_osd)
+	.vs_out(vga_vs_osd),
+	.de_out()
 );
 
 wire vga_cs_osd;

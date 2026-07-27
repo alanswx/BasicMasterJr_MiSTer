@@ -1,6 +1,7 @@
 
 module video(
-  input clk,
+  input clk_sys,
+  input clk_vid,
 
   output reg hs,
   output reg vs,
@@ -47,7 +48,7 @@ initial begin
   vs = 1'b1;
 end
 
-reg [7:0] color_ram[32*24:0];
+reg [7:0] color_ram[0:767];
 
 // ---------------------------------------------------------------------------
 // Character-cell renderer
@@ -56,19 +57,21 @@ reg [7:0] color_ram[32*24:0];
 // the 256x192 picture; each pixel needs the cell's attribute, its pattern byte
 // (character generator in text mode, RAM in graphics mode) and one bit of it.
 // ---------------------------------------------------------------------------
-reg [1:0] state;
+reg [2:0] state;
 reg [7:0] px, py;
-reg [2:0] vram[256*192:0];
 
 wire [9:0] cell_idx = { py[7:3], px[7:3] };          // (py/8)*32 + (px/8)
-wire [15:0] gfx_base = 16'h0900 + { screen_mode[3:0], 9'd0 };  // $900 + $200*n
+wire [15:0] gfx_base = 16'h0900 + {3'd0, screen_mode[3:0], 9'd0};  // $900 + $200*n
 wire graphics_en   = screen_mode[6];
 wire graphics_only = screen_mode[7];
 
 // In mixed mode bm2 alternates whole frames between the text page and the
 // bitmap; whether real hardware overlays them instead is unconfirmed.
 reg mix_phase;
-wire show_gfx = graphics_en & (graphics_only | mix_phase);
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+reg mix_phase_meta, mix_phase_sys;
+reg blink_meta, blink_sys;
+wire show_gfx = graphics_en & (graphics_only | mix_phase_sys);
 
 reg [7:0] color;
 reg [7:0] pattern;
@@ -80,78 +83,102 @@ wire [7:0] attr = inverted ? { color[3:0], color[7:4] } : color;
 // Blink: bit 3 blanks the foreground on one phase, bit 7 blanks the background
 // on the other. [bm2 depend.c:150-160]
 reg blink;
-wire [7:0] attr_b = blink ? (attr[3] ? (attr & 8'h70) : (attr & 8'h77))
+
+always @(posedge clk_sys) begin
+  mix_phase_meta <= mix_phase;
+  mix_phase_sys  <= mix_phase_meta;
+  blink_meta     <= blink;
+  blink_sys      <= blink_meta;
+end
+
+wire [7:0] attr_b = blink_sys ? (attr[3] ? (attr & 8'h70) : (attr & 8'h77))
                           : (attr[7] ? (attr & 8'h07) : (attr & 8'h77));
 wire [2:0] fg = attr_b[2:0];
 wire [2:0] bg = attr_b[6:4];
 
-always @(posedge clk) begin
+wire render_bit = show_gfx ? pattern[3'd7-px[2:0]] : char_data[3'd7-px[2:0]];
+wire [2:0] render_color = color_board ? (render_bit ? fg : bg)
+                                      : (render_bit ?
+                                          (inverted ? 3'b000 : 3'b111) :
+                                          (inverted ? 3'b111 : 3'b000));
+
+wire [15:0] scan_addr = (hcount < 9'd256 && vcount < 9'd192)
+                        ? {vcount[7:0], hcount[7:0]} : 16'd0;
+wire [2:0] vram_data;
+reg [2:0] scan_data;
+
+video_framebuffer framebuffer(
+  .wr_clk(clk_sys),
+  .wr_en(state == 3'd4),
+  .wr_addr({py, px}),
+  .wr_data(render_color),
+  .rd_clk(clk_vid),
+  .rd_addr(scan_addr),
+  .rd_data(vram_data)
+);
+
+always @(posedge clk_sys) begin
   color <= color_ram[cell_idx];
   if (color_ram_wr) color_ram[color_ram_addr] <= charcolor;
 end
 
-always @(posedge clk) begin
+always @(posedge clk_sys) begin
   case (state)
-    2'd0: begin
+    3'd0: begin
       // Graphics mode reads the bitmap directly; text mode reads the character
       // code and looks it up in the generator on the next state.
-      ram_addr <= show_gfx ? (gfx_base + { py[7:3], 8'd0 } + { py[2:0], 5'd0 } + { 8'd0, px[7:3] })
+      ram_addr <= show_gfx ? (gfx_base + {3'd0, py[7:3], 8'd0} + {8'd0, py[2:0], 5'd0} + {11'd0, px[7:3]})
                            : (16'h100 + { 6'd0, cell_idx });
-      state <= 2'd1;
+      state <= 3'd1;
     end
-    2'd1: begin
+    3'd1: begin
+      // Wait for the synchronous system-RAM read port.
+      state <= 3'd2;
+    end
+    3'd2: begin
       char_addr <= { ram_data, py[2:0] };
       pattern <= ram_data;
-      state <= 2'd2;
+      state <= 3'd3;
     end
-    2'd2: begin
-      begin
-        reg bit_on;
-        bit_on = show_gfx ? pattern[3'd7-px[2:0]] : char_data[3'd7-px[2:0]];
-
-        if (color_board)
-          vram[py*256+px] <= bit_on ? fg : bg;
-        else
-          vram[py*256+px] <= bit_on ?
-            inverted ? 3'b000 : 3'b111 :
-            inverted ? 3'b111 : 3'b000;
-      end
-
+    3'd3: begin
+      // Wait for the synchronous character-ROM read port.
+      state <= 3'd4;
+    end
+    3'd4: begin
       px <= px + 8'd1;
       if (px == 255) begin
         py <= py + 8'd1;
         if (py == 8'd191) py <= 8'd0;
       end
-      state <= 2'd0;
+      state <= 3'd0;
     end
+    default: state <= 3'd0;
   endcase
 end
 
 // ---------------------------------------------------------------------------
 // Display scan
 // ---------------------------------------------------------------------------
-reg [15:0] vram_addr;
-reg [2:0] vram_data;
 reg [5:0] blink_div;
 
-always @(posedge clk) begin
+always @(posedge clk_vid) begin
 
   frame <= 1'b0;
   ce_pix <= ~ce_pix;
 
   if (~ce_pix) begin
 
-    vram_addr <= vcount * 256 + hcount;
-    vram_data <= vram[vram_addr];
+    // Register once more to preserve the original one-pixel scan pipeline.
+    scan_data <= vram_data;
 
   end
 
   else begin
 
     if (~(hb|vb)) begin
-      red <= vram_data[2] ? 8'hff : 8'd0;
-      green <= vram_data[1] ? 8'hff : 8'd0;
-      blue <= vram_data[0] ? 8'hff : 8'd0;
+      red <= scan_data[2] ? 8'hff : 8'd0;
+      green <= scan_data[1] ? 8'hff : 8'd0;
+      blue <= scan_data[0] ? 8'hff : 8'd0;
     end
 
     hcount <= hcount + 9'd1;
@@ -185,6 +212,28 @@ always @(posedge clk) begin
 
   end
 
+end
+
+endmodule
+
+module video_framebuffer(
+  input         wr_clk,
+  input         wr_en,
+  input  [15:0] wr_addr,
+  input   [2:0] wr_data,
+  input         rd_clk,
+  input  [15:0] rd_addr,
+  output reg [2:0] rd_data
+);
+
+(* ramstyle = "M10K, no_rw_check" *) reg [2:0] mem[0:49151];
+
+always @(posedge wr_clk) begin
+  if (wr_en) mem[wr_addr] <= wr_data;
+end
+
+always @(posedge rd_clk) begin
+  rd_data <= mem[rd_addr];
 end
 
 endmodule

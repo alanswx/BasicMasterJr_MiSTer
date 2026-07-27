@@ -123,6 +123,7 @@ always @(posedge clk_sys) begin
       8'h74: keys[11][3] <= ~status; // ^ / right
       8'h6b: keys[12][3] <= ~status; // yen / left
       8'h5d: keys[12][3] <= ~status; // yen (JP backslash key)
+      default: ;
 
     endcase
 

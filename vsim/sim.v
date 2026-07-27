@@ -131,7 +131,7 @@ assign ioctl_wait = 1'b0;
 wire        hs, vs, hb, vb;
 wire  [7:0] red, green, blue;
 wire  [3:0] kb_key, kb_mod;
-wire  [7:0] kb_col;
+wire  [3:0] kb_col;
 wire        key_pressed;
 wire        ce_pix;
 wire        tape_bit;
@@ -182,7 +182,6 @@ core core (
 	.kb_col     (kb_col),
 	.kb_key     (kb_key),
 	.kb_mod     (kb_mod),
-	.key_pressed(key_pressed),
 	.hs         (hs),
 	.vs         (vs),
 	.hb         (hb),
@@ -241,7 +240,7 @@ assign dbg_tape_addr  = cassette.sdram_addr;
 assign dbg_tape_size  = tape_size;
 assign dbg_tape_byte  = cassette.shifter;
 assign dbg_screen_mode = core.screen_mode;
-assign dbg_kb_col     = kb_col;
+assign dbg_kb_col     = {4'd0, kb_col};
 assign dbg_kb_key     = kb_key;
 assign dbg_kb_mod     = kb_mod;
 assign dbg_kb_status  = keyboard.status;

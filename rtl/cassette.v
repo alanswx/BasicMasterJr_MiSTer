@@ -69,7 +69,7 @@ module cassette (
 
   // The frame bit currently on the wire: start low, 8 data LSB first, stops high.
   wire frame_bit = (bit_index == 4'd0) ? 1'b0
-                 : (bit_index <= 4'd8) ? shifter[bit_index - 4'd1]
+                 : (bit_index <= 4'd8) ? shifter[bit_index[2:0] - 3'd1]
                                        : 1'b1;
 
   always @(posedge clk_sys) begin

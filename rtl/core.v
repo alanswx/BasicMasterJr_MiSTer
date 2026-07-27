@@ -6,10 +6,9 @@ module core(
   input clk_cpu,   // 750 kHz clock ENABLE on clk_sys, not a clock
   input clk_vid,
 
-  output reg [7:0] kb_col,
+  output reg [3:0] kb_col,
   input [3:0] kb_key,
   input [3:0] kb_mod,
-  input key_pressed,
 
   output hs,
   output vs,
@@ -34,6 +33,7 @@ assign dac_level = dac;
 wire [15:0] cpu_addr;
 wire [7:0] cpu_dout;
 wire cpu_rw;
+wire vma;
 
 wire [7:0] mux_out;
 wire [7:0] mux = ~mux_out;
@@ -62,7 +62,7 @@ wire [7:0] cpu_din =
 // and only while $E892 bit 0 (色情報書き込み許可 / colour write enable) is set.
 // Reads used to latch too, which let the video scanner scribble over
 // attributes. [bm2 bm2mem.c:77-83]
-wire vram_write = ~cpu_rw & color_board[0]
+wire vram_write = vma & ~cpu_rw & color_board[0]
                & (cpu_addr >= 16'h100) & (cpu_addr < 16'h400);
 
 wire [15:0] video_ram_addr;
@@ -70,7 +70,8 @@ wire [7:0] video_ram_data;
 wire [10:0] video_char_addr;
 
 video video(
-  .clk(clk_vid),
+  .clk_sys(clk_sys),
+  .clk_vid(clk_vid),
   .hs(hs),
   .vs(vs),
   .hb(hb),
@@ -79,6 +80,9 @@ video video(
   .green(green),
   .blue(blue),
   .ce_pix(ce_pix),
+  .hcount(),
+  .vcount(),
+  .frame(),
   .ram_addr(video_ram_addr),
   .char_addr(video_char_addr),
   .ram_data(video_ram_data),
@@ -87,7 +91,7 @@ video video(
   .inverted(xor_disp[7]),
   .screen_mode(screen_mode),
   .charcolor(charcolor),
-  .color_ram_addr(cpu_addr - 16'h100),
+  .color_ram_addr(cpu_addr[9:0] - 10'h100),
   .color_ram_wr(vram_write)
 );
 
@@ -106,18 +110,22 @@ video video(
 // clears, and the CPU lives in the handler. (It does: keyboard input dies.)
 reg irq;
 reg [19:0] irq_age;
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+reg vs_meta, vs_sys;
 reg old_vs;
 wire timer_dis = bank_mode[4];
 wire irq_vector_fetch = cpu_rw & (cpu_addr == 16'hFFF8);
 
 always @(posedge clk_sys) begin
-  old_vs <= vs;
+  vs_meta <= vs;
+  vs_sys  <= vs_meta;
+  old_vs  <= vs_sys;
   if (reset) begin
     irq     <= 1'b0;
     irq_age <= 20'd0;
   end
   else begin
-    if (old_vs & ~vs & ~timer_dis) begin
+    if (old_vs & ~vs_sys & ~timer_dis) begin
       irq     <= 1'b1;
       irq_age <= 20'd0;
     end
@@ -204,7 +212,7 @@ ram ram(
   .addr(cpu_addr),
   .din(cpu_dout),
   .dout(ram_dout),
-  .wr(~cpu_rw),
+  .wr(~cpu_rw & vma),
   .ce(ram_sel),
   .addr_b(video_ram_addr),
   .dout_b(video_ram_data)
@@ -220,7 +228,12 @@ rom #(.MEMFILE("rom0.mem"), .DW(8), .AW(11)) rom0(
 
 rom #(.MEMFILE("romb.mem"), .DW(8), .AW(13)) romB(clk_sys, { ~cpu_addr[12], cpu_addr[11:0] }, romB_dout, romB_sel);
 rom #(.MEMFILE("romdf.mem"), .DW(8), .AW(13)) romDF(clk_sys, { cpu_addr[13], cpu_addr[11:0] }, romDF_dout, romD_sel|romF_sel);
-rom #(.MEMFILE("rome.mem"), .DW(8), .AW(11)) romE(clk_sys, cpu_addr[10:0], romE_dout);
+rom #(.MEMFILE("rome.mem"), .DW(8), .AW(11)) romE(
+  .clk(clk_sys),
+  .addr(cpu_addr[10:0]),
+  .dout(romE_dout),
+  .ce(romE_sel)
+);
 
 
 // IO map
@@ -234,7 +247,6 @@ reg [7:0] screen_mode;  // $EFE0
 reg       kb_nmi_en;
 reg       irq_ack;      // pulses when the handler reads $EF40
 reg [4:0] dac;          // $EE80 bits 5:1 -> 5-bit R-2R ladder
-reg       tape_out;     // $EE80 bit 0 -> tape write
 
 // $EFD0: ---x ---- timer IRQ disable, ---- -x-- $F000 RAM,
 //        ---- --x- $E000 RAM, ---- ---x $B000 RAM
@@ -252,8 +264,10 @@ always @(posedge clk_sys) begin
     mp1710on <= 1'b0;
     bckreg <= 8'h70;        // bm2's no-adapter default
     screen_mode <= 8'd0;
+    color_board <= 8'd0;
+    kb_nmi_en <= 1'b0;
+    kb_col <= 4'd0;
     dac <= 5'd0;
-    tape_out <= 1'b0;
   end
   else if (io_sel) begin
     case (cpu_addr)
@@ -277,29 +291,30 @@ always @(posedge clk_sys) begin
         end
       end
       16'hee00: begin
-        io_out <= 1'b1;
+        io_out <= 8'h01;
         tape_stop <= 1'b1;
       end
       16'hee20: begin
-        io_out <= 1'b1;
+        io_out <= 8'h01;
         tape_start <= 1'b1;
       end
       16'hee40: xor_disp <= cpu_dout;
       // Tape in / tape out + speaker. Reads give the demodulated serial line on
-      // bit 7. Writes latch IC40 (HD74LS174): bit 0 drives the tape output,
+      // bit 7. Writes latch IC40 (HD74LS174): bit 0 is the unimplemented tape output,
       // bits 5:1 drive a 5-bit R-2R ladder into the speaker amp. [SCH, ROM $F535]
       16'hee80:
         if (cpu_rw)
           io_out <= { tape_bit, 7'd0 };
         else begin
-          tape_out <= cpu_dout[0];
           dac      <= cpu_dout[5:1];
         end
       16'heec0: begin // kb
         if (cpu_rw)
           io_out <= { kb_mod, kb_key };
-        else
-          { kb_nmi_en, kb_col[6:0] } <= cpu_dout;
+        else begin
+          kb_nmi_en <= cpu_dout[7];
+          kb_col    <= cpu_dout[3:0];
+        end
       end
       // Read-to-clear interrupt acknowledge: the timer handler does
       // LDAA $EF40 immediately before its RTI at $F0B9.

@@ -295,8 +295,7 @@ wire sdram_init = RESET | status[0] | buttons[1];
 wire hs, vs, hb, vb;
 wire [7:0] red, green, blue;
 wire [3:0] kb_key, kb_mod;
-wire [7:0] kb_col;
-wire key_pressed;
+wire [3:0] kb_col;
 
 wire adc_cassette_bit;
 wire ce_pix;
@@ -343,7 +342,6 @@ sdram sdram_inst(
   .rd(1'b0),
   .ready(),
   .SDRAM_CKE(SDRAM_CKE),
-  .SDRAM_CLK(),
   .SDRAM_A(SDRAM_A),
   .SDRAM_BA(SDRAM_BA),
   .SDRAM_DQ(SDRAM_DQ),
@@ -400,7 +398,6 @@ core core(
   .kb_col(kb_col),
   .kb_key(kb_key),
   .kb_mod(kb_mod),
-  .key_pressed(key_pressed),
   .hs(hs),
   .vs(vs),
   .hb(hb),
@@ -424,7 +421,7 @@ keyboard keyboard(
   .kb_key(kb_key),
   .kb_mod(kb_mod),
   .break_key(break_key),
-  .status(key_pressed)
+  .status()
 );
 
 assign CLK_VIDEO = clk_vid;
