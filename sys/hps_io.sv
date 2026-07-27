@@ -629,11 +629,9 @@ always@(posedge clk_sys) begin : fio_block
 	reg  [2:0] cnt;
 	reg        has_cmd;
 	reg [26:0] addr;
-	reg        wr;
 	
 	ioctl_rd <= 0;
-	ioctl_wr <= wr;
-	wr <= 0;
+	ioctl_wr <= 0;
 
 	if(~fp_enable) has_cmd <= 0;
 	else begin
@@ -695,7 +693,7 @@ always@(posedge clk_sys) begin : fio_block
 						if(ioctl_download) begin
 							ioctl_addr <= addr;
 							ioctl_dout <= io_din[DW:0];
-							wr   <= 1;
+							ioctl_wr <= 1;
 							addr <= addr + (WIDE ? 2'd2 : 2'd1);
 						end
 						else begin

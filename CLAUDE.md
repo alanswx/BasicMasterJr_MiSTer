@@ -25,7 +25,7 @@ rtl/core.v            memory map, I/O decode, ROM/RAM banking, CPU + video glue
 rtl/m6801.sv          CPU core (6801; the machine is a 6800, a strict subset)
 rtl/video.v           character generator + framebuffer + video timing
 rtl/keyboard.v        PS/2 -> 4x16 key matrix
-rtl/cassette.v        tape playback from SDRAM (does not work yet -- see TODO.md)
+rtl/cassette.v        300-baud tape playback from the on-chip image buffer
 rtl/rom*.mem          BASIC / monitor / printer ROMs and the character generator
 rtl/dpram.v, pll.v    Quartus megafunction wrappers (shadowed in sim, see below)
 vsim/                 Verilator simulation -- build, run, screenshot, regress
@@ -102,12 +102,11 @@ differences, all commented in the file:
 
 * `clk_vid` comes from a phase accumulator instead of the Altera PLL (same
   10.638 MHz, ~59 Hz frames, up to one `clk_sys` of jitter).
-* `vsim/rtl/dpram.v` and `vsim/rtl/sdram.sv` shadow the Quartus megafunction
-  versions of the same module names. **Do not add `-I../rtl` to the Verilator
-  command** — it lets Verilator auto-load the real `sdram.sv` as a duplicate and
-  pick the wrong one.
-* `ioctl_wait` is driven from the SDRAM handshake; the real top leaves it undriven.
-* `sdram_wtbt` has a single driver; the real top double-drives it (a build bug).
+* `vsim/rtl/dpram.v` shadows the Quartus dual-port RAM wrapper. **Do not add
+  `-I../rtl` to the Verilator command**; it can bypass the explicit simulation
+  source list and select the synthesis wrapper.
+* Tape images use the same dedicated 64 KiB dual-port RAM in both tops.
+  `ioctl_wait` is therefore tied low; external SDRAM is not part of playback.
 
 Debug taps (`dbg_*` ports) are hierarchical reads out of the core, so adding one
 needs no RTL change — just another `assign dbg_x = core.something;` in `sim.v`.
@@ -123,7 +122,8 @@ Entry is `$2200` for everything except MAZY (`$1000`). Details and provenance in
 Loading works: `./tape_test.sh` checks a block byte-for-byte, `./tape_test.sh full`
 loads all of MAZY and runs it.
 
-Tape runs at the real 300 baud (`.bit_period` = 166667). That only works because
+Tape images must fit in the 64 KiB on-chip buffer. Tape runs at the real 300 baud
+(`.bit_period` = 166667). That only works because
 `rtl/m6800_pad.v` makes the CPU keep 6800 time — see below. If tapes stop loading,
 check CPU timing first.
 

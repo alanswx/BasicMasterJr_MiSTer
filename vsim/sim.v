@@ -2,14 +2,13 @@
 //============================================================================
 //  Simulation top (Verilator) for the Basic Master Jr. core.
 //
-//  This stands in for BasicMasterJr.sv: same wiring, but hps_io / the Altera
-//  PLL / the SDRAM controller are replaced by things sim_main.cpp can drive.
+//  This stands in for BasicMasterJr.sv: same wiring, but hps_io and the Altera
+//  PLL are replaced by things sim_main.cpp can drive.
 //  Keep it in sync with BasicMasterJr.sv when the real top changes.
 //
 //  Deliberate differences from BasicMasterJr.sv, all noted inline:
 //    * clk_vid is made with a phase accumulator instead of a PLL
-//    * sdram is a behavioural byte array (vsim/rtl/sdram.sv)
-//    * sdram_wtbt has a single driver here (the real top double-drives it)
+//    * the 64 KiB tape RAM uses the behavioural dpram wrapper
 //============================================================================
 
 module emu (
@@ -91,8 +90,8 @@ always @(posedge clk_sys) begin
 	if (vid_acc + VID_INC < vid_acc) clk_vid <= ~clk_vid;  // carry out => toggle
 end
 
-// CPU clock -- identical to BasicMasterJr.sv. core.v uses clk_cpu as a real
-// clock (posedge clk_cpu), so this is a pulse train, not an enable.
+// CPU clock enable -- identical to BasicMasterJr.sv. core.v runs the CPU on
+// clk_sys and uses clk_cpu as a clock enable, so this is a one-tick-in-67 pulse.
 // 3 CPU cycles = 200 clk_sys ticks => exactly 750,000 Hz on average.
 reg [6:0] div = 7'd0;
 reg [1:0] phase = 2'd0;
@@ -111,34 +110,25 @@ assign dbg_cpu_ce = clk_cpu;
 
 wire core_reset = reset | ioctl_download;
 
-//////////////////////////////  SDRAM  ///////////////////////////////////////
-wire [24:0] sdram_addr;
-wire [15:0] sdram_data;
-wire        sdram_rd;
-wire        sdram_we;
-wire  [1:0] sdram_wtbt;
-wire        sdram_ready;
+//////////////////////////////  TAPE BUFFER  ///////////////////////////////////
+// Match the hardware top: HPS downloads into a dedicated 64 KiB dual-port
+// block RAM, and the cassette reads its second port. There is no external
+// SDRAM handshake in the tape path, so downloads can accept one byte per tick.
+wire [24:0] tape_addr;
+wire  [7:0] tape_buffer_data;
 
-// Behavioural stand-in for rtl/sdram.sv (vsim/rtl/sdram.sv). Byte addressed,
-// same ready/rd handshake, no chip pins.
-// init must exclude the download: it forces the controller back to
-// STATE_STARTUP every cycle it is high, which discards the transfer.
-sdram sdram_inst (
-	.init  (reset),
-	.clk   (clk_sys),
-	.wtbt  (ioctl_download ? 2'b00 : sdram_wtbt),
-	.addr  (ioctl_download ? ioctl_addr : sdram_addr),
-	.dout  (sdram_data),
-	.din   ({8'd0, ioctl_dout}),
-	.we    (ioctl_download & ioctl_wr),
-	.rd    (sdram_rd),
-	.ready (sdram_ready)
+ram tape_buffer (
+	.clk    (clk_sys),
+	.addr   (ioctl_addr[15:0]),
+	.din    (ioctl_dout),
+	.dout   (),
+	.wr     (ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+	.ce     (1'b1),
+	.addr_b (tape_addr[15:0]),
+	.dout_b (tape_buffer_data)
 );
 
-// The real top leaves ioctl_wait undriven. Drive it from the SDRAM handshake
-// so the sim never silently drops bytes out of a tape image; if you are
-// chasing a download bug, tie it to 0 to reproduce hardware behaviour.
-assign ioctl_wait = ioctl_download & ~sdram_ready;
+assign ioctl_wait = 1'b0;
 
 //////////////////////////////  CORE  ////////////////////////////////////////
 wire        hs, vs, hb, vb;
@@ -175,12 +165,12 @@ cassette cassette (
 	.tape_stop   (tape_stop),
 	.tape_rewind (tape_rewind),
 	.image_size  (tape_size),
-	.sdram_addr  (sdram_addr),
-	.sdram_data  (sdram_data),
-	.sdram_rd    (sdram_rd),
-	.sdram_we    (sdram_we),
-	.sdram_wtbt  (sdram_wtbt),
-	.sdram_ready (sdram_ready),
+	.sdram_addr  (tape_addr),
+	.sdram_data  ({8'd0, tape_buffer_data}),
+	.sdram_rd    (),
+	.sdram_we    (),
+	.sdram_wtbt  (),
+	.sdram_ready (1'b1),
 	.tape_bit    (tape_bit),
 	.motor       (tape_motor),
 	.status      ()

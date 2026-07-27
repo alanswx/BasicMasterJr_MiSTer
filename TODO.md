@@ -45,9 +45,11 @@ the 750 kHz CPU clock, IRQ/NMI, the 5-bit DAC, `$EFE0` mode decode, blink
 attributes and `$E891`, and the keyboard rewrite. Two extra bugs were found and
 fixed along the way:
 
-* **`sdram_inst.init` was tied to a reset that includes `ioctl_download`**, so the
-  controller sat in `STATE_STARTUP` for the entire transfer and every byte of a
-  tape image was discarded. `BasicMasterJr.sv` now has a separate `sdram_init`.
+* **The original external-SDRAM tape path lost or misaligned download bytes.**
+  Tape images now download into a dedicated 64 KiB dual-port block RAM, and
+  `hps_io` asserts `ioctl_wr` in the same cycle as its address and data. This was
+  verified on MiSTer by dumping all 7,446 MAZY image bytes and all 5,560 loaded
+  program bytes over JTAG.
 * **The keyboard used the PS/2 shift state to pick the matrix position** while
   also passing shift to the machine, so `:` `@` `=` `^` `_` could never be typed.
   `rtl/keyboard.v` now maps one PS/2 key per matrix position.

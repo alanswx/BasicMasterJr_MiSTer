@@ -3,7 +3,7 @@ module core(
   input reset,
 
   input clk_sys,
-  input clk_cpu,
+  input clk_cpu,   // 750 kHz clock ENABLE on clk_sys, not a clock
   input clk_vid,
 
   output reg [7:0] kb_col,
@@ -148,21 +148,29 @@ end
 
 // The CPU core is a 6801; this machine has a 6800. m6800_pad stalls the core
 // so each opcode takes the number of clocks a 6800 would. See rtl/m6800_pad.v.
+//
+// Both run on clk_sys with clk_cpu as a clock ENABLE. clk_cpu is `div == 0`, a
+// one-tick-in-67 pulse decoded from a counter -- driving a clock port with it
+// asks the fitter to build a clock out of fabric logic, which glitches on the
+// counter's bit skew and leaves the whole CPU outside TimeQuest's analysis.
+// Every register in m6801.sv is gated by `cen` (the port is (*direct_enable*)),
+// and m6800_pad gates on cen_in, so enabling is cycle-for-cycle identical to
+// clocking and keeps the CPU, the RAM and the ROMs in one 50 MHz domain.
 wire cpu_cen;
 wire cpu_in_decode;
 wire [7:0] cpu_opcode;
 
 m6800_pad cpu_pad(
-  .clk(clk_cpu),
+  .clk(clk_sys),
   .rst(reset),
-  .cen_in(1'b1),
+  .cen_in(clk_cpu),
   .in_decode(cpu_in_decode),
   .opcode(cpu_opcode),
   .cen_out(cpu_cen)
 );
 
 m6801 cpu(
-  .clk(clk_cpu),
+  .clk(clk_sys),
   .rst(reset),
   .cen(cpu_cen),
   .rw(cpu_rw),

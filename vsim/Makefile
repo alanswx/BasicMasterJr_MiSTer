@@ -5,16 +5,14 @@ RTL   = ../rtl
 V_INC =
 
 # NOTE: no -I/-y search path on purpose. Every source is listed explicitly in
-# V_SRC below, and vsim/rtl/{dpram.v,sdram.sv} must shadow the Quartus
-# megafunction versions of the same module names in ../rtl. Adding ../rtl to
-# the search path lets Verilator auto-load ../rtl/sdram.sv as a duplicate and
-# then pick the wrong one.
+# V_SRC below, and vsim/rtl/dpram.v must shadow the Quartus megafunction
+# version in ../rtl. Adding ../rtl to the search path can also
+# make Verilator auto-load modules outside this explicit source list.
 #
 # PINMISSING is expected: core.v deliberately leaves video.v's hcount/vcount/
 # frame outputs unconnected.
 # +incdir+ only (NOT -I): m6800_pad.v needs to find m6800_pad_table.vh, but
-# -I would also put ../rtl on the module search path and let the real sdram.sv
-# shadow our behavioural one.
+# -I would also put ../rtl on the module search path and bypass that override.
 V_DEFINE = +define+SIMULATION=1 +incdir+$(RTL) \
 	-CFLAGS "-I../sim/imgui -I../sim/vinc -I../sim/ -g" \
 	--timescale-override 1ps/1ps \
@@ -54,11 +52,10 @@ CXXFLAGS += $(CC_OPT) $(CXX_DEFINE) -Isim/imgui
 LDFLAGS   = $(LIBS)
 EXE       = ./obj_dir/Vemu
 
-# rtl/dpram.v and rtl/sdram.sv are the vsim overrides, NOT ../rtl/*
+# rtl/dpram.v is the vsim override, NOT ../rtl/dpram.v
 V_SRC = \
 	sim.v \
 	rtl/dpram.v \
-	rtl/sdram.sv \
 	$(RTL)/core.v \
 	$(RTL)/keyboard.v \
 	$(RTL)/m6801.sv \

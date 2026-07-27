@@ -12,7 +12,15 @@
 
 #include <verilated.h>
 #include "Vemu.h"
-#include "Vemu___024root.h"
+
+// Verilator 4.210+ splits public-flat internals into a root class; older
+// releases keep them directly on Vemu. Support both generated layouts.
+#if defined(__has_include)
+# if __has_include("Vemu___024root.h")
+#  include "Vemu___024root.h"
+#  define VEMU_SPLIT_ROOT 1
+# endif
+#endif
 
 #ifndef _MSC_VER
 #include <SDL.h>
@@ -234,6 +242,12 @@ static std::string unescape(const std::string& in)
 	return out;
 }
 
+#ifdef VEMU_SPLIT_ROOT
+# define BMJR_MAIN_RAM top->rootp->emu__DOT__core__DOT__ram__DOT__dpram__DOT__mem
+#else
+# define BMJR_MAIN_RAM top->emu__DOT__core__DOT__ram__DOT__dpram__DOT__mem
+#endif
+
 static void save_mem_dump(const MemDump& d)
 {
 	char filename[256];
@@ -242,7 +256,7 @@ static void save_mem_dump(const MemDump& d)
 	FILE* f = fopen(filename, "wb");
 	if (!f) { printf("dump-mem: cannot write %s\n", filename); return; }
 	for (unsigned a = d.addr; a < d.addr + d.len && a < 0x10000; a++)
-		fputc(top->rootp->emu__DOT__core__DOT__ram__DOT__dpram__DOT__mem[a], f);
+		fputc(BMJR_MAIN_RAM[a], f);
 	fclose(f);
 	printf("Memory dump saved: %s\n", filename);
 	fflush(stdout);
@@ -253,7 +267,7 @@ static void apply_poke(const MemPoke& q)
 	for (size_t i = 0; i < q.bytes.size(); i++) {
 		unsigned a = q.addr + (unsigned)i;
 		if (a < 0x10000)
-			top->rootp->emu__DOT__core__DOT__ram__DOT__dpram__DOT__mem[a] = q.bytes[i];
+			BMJR_MAIN_RAM[a] = q.bytes[i];
 	}
 	printf("Poked %zu byte(s) at $%04X\n", q.bytes.size(), q.addr);
 	fflush(stdout);

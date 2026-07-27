@@ -11,9 +11,9 @@ byte-exact and the program runs.
 **Not finished:** graphics-mode scanline placement is wrong, tape *saving* is not
 implemented, and one CPU opcode is still a clock out. See [TODO.md](TODO.md).
 
-> **Not yet built in Quartus.** Everything here is verified under Verilator only.
-> The RTL is written to be synthesisable, but timing closure and real hardware
-> behaviour are unverified.
+**Hardware verified:** the Quartus 17.0.2 release boots with stable HDMI at
+256x192, accepts keyboard input, mounts a tape through MiSTer, loads MAZY
+byte-for-byte, and runs it at `$1000`.
 
 ---
 
@@ -24,6 +24,17 @@ implemented, and one CPU opcode is still a clock out. See [TODO.md](TODO.md).
 1. Copy tape images (`.bin`) somewhere under `/media/fat/games/BasicMasterJr/`.
 2. In the core's OSD choose **Load Tape** and pick the image.
 3. Mounting rewinds the tape to the start, so you can reload the same image freely.
+
+An MGL can launch the core and mount a tape in one step. For example, if the MGL
+is stored in `/media/fat/`:
+
+```xml
+<mistergamedescription>
+  <rbf>BasicMasterJr</rbf>
+  <file delay="2" type="f" index="1"
+        path="../../../../../media/fat/games/BasicMasterJr/mazy.s.bin"/>
+</mistergamedescription>
+```
 
 Then drive the machine's own loader. Programs are almost all machine code loaded
 from the monitor:
@@ -37,14 +48,15 @@ G 1000     <Space>       run it, from the program's entry address
 The **Space, not Return** terminator is real — it is how the monitor works, and it
 trips up everyone (MAME's driver notes it too). Type `L`, then the name, then Space.
 
-Loading is real-time: 300 baud means a 5 KB program takes about four minutes, the
-same as it did in 1981. The screen shows nothing while it loads; `* ERROR` means a
-checksum failed.
+Loading is real-time: MAZY's 7,446-byte image takes about four minutes at 300
+baud, just as it did on the original machine. The screen lists blocks as they load;
+`* ERROR` means the monitor rejected a command or detected bad tape data.
 
 BASIC programs (saved as ASCII, extension `.S` in the tape header) load with BASIC's
 own `LOAD` instead of the monitor's `L`.
 
-Entry addresses differ per title — `MAZY` runs at `$1000`, most others at `$2200`.
+Tape images must be no larger than 64 KiB. Entry addresses differ per title —
+`MAZY` runs at `$1000`, most others at `$2200`.
 `software/bmtape_info.py` prints the name, entry address and checksum status of any
 image:
 
@@ -97,7 +109,7 @@ play into real hardware.
 
 ## Building for MiSTer
 
-Quartus 17.0.x or later, as usual for MiSTer:
+Quartus 17.0.x, as used by the verified hardware build:
 
 ```bash
 quartus_sh --flow compile BasicMasterJr

@@ -118,15 +118,17 @@ cd vsim/
                --screenshot 900 --stop-at-frame 950
 ```
 
-## Current status in the sim
+## Current status
 
-The **download path works** — `--tape` gets all 7,446 bytes of `mazy.s.bin` into
-SDRAM. Playback does not: `--trace-tape` shows the state machine sitting in
-`S_SKIP_HEADER` at address 0 forever, which is the motor-latch bug (task #5,
-`TODO.md` P1). Nothing here is blocked on the images.
+Tape loading works end to end in both Verilator and on a physical MiSTer. The
+hardware test mounted `mazy.s.bin`, transferred all 7,446 image bytes into the
+64 KiB on-chip tape buffer, loaded all 5,560 program bytes byte-for-byte into
+`$1000-$25B7`, and ran MAZY at `$1000`.
 
-Note: the shared `sim/sim_bus.cpp` reports "Download complete, N bytes" where N is
-the last address written, so it reads one low. All bytes do transfer.
+The simulator uses the same dual-port buffer architecture. `vsim/tape_test.sh`
+checks loaded RAM against the tape image; its `full` mode also executes the
+program. The shared `sim/sim_bus.cpp` completion message reports the final byte
+address, so its displayed count is one less than the number of bytes transferred.
 
 ## Provenance and redistribution
 

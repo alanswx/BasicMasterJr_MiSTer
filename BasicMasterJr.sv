@@ -304,21 +304,23 @@ wire ce_pix;
 wire break_key;
 wire [4:0] dac_level;
 
-// SDRAM wires for tape loading
-wire [24:0] sdram_addr;
-wire [15:0] sdram_data;
-wire sdram_rd;
-wire sdram_we;
-wire [1:0] sdram_wtbt;   // driven by the cassette module only
-wire sdram_ready;
+// The cassette reads the on-chip tape buffer. Keep the physical SDRAM
+// controller initialized and idle so its external pins remain well defined.
+wire [24:0] cassette_sdram_addr;
 wire tape_start;
 wire tape_stop;
 
+// The tape image lives in a dedicated dual-port 64 KiB block RAM. hps_io
+// writes one port at full speed while the cassette reads the other, avoiding
+// the edge-triggered external SDRAM handshake and byte-lane hazards.
+assign ioctl_wait = 1'b0;
+
 // Latch how many bytes the tape image holds, so the player knows where the
-// tape ends instead of running off into whatever else is in SDRAM. Reset the
+// tape ends instead of wrapping through stale buffer data. Reset the
 // position whenever a new image is mounted.
 reg [24:0] tape_size;
 reg        tape_rewind;
+wire [7:0] tape_buffer_data;
 always @(posedge clk_sys) begin
   reg old_download;
   old_download <= ioctl_download;
@@ -332,13 +334,13 @@ end
 sdram sdram_inst(
   .init(sdram_init),
   .clk(clk_sys),
-  .wtbt(sdram_wtbt),
-  .addr(ioctl_download ? ioctl_addr : sdram_addr),
-  .dout(sdram_data),
-  .din({8'd0, ioctl_dout}),
-  .we(ioctl_download & ioctl_wr),
-  .rd(sdram_rd),
-  .ready(sdram_ready),
+  .wtbt(2'b00),
+  .addr(25'd0),
+  .dout(),
+  .din(16'd0),
+  .we(1'b0),
+  .rd(1'b0),
+  .ready(),
   .SDRAM_CKE(SDRAM_CKE),
   .SDRAM_CLK(),
   .SDRAM_A(SDRAM_A),
@@ -350,6 +352,19 @@ sdram sdram_inst(
   .SDRAM_nRAS(SDRAM_nRAS),
   .SDRAM_nCAS(SDRAM_nCAS),
   .SDRAM_nWE(SDRAM_nWE)
+);
+
+wire [15:0] tape_buffer_addr = cassette_sdram_addr[15:0];
+
+ram tape_buffer(
+  .clk(clk_sys),
+  .addr(ioctl_addr[15:0]),
+  .din(ioctl_dout),
+  .dout(),
+  .wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+  .ce(1'b1),
+  .addr_b(tape_buffer_addr),
+  .dout_b(tape_buffer_data)
 );
 
 cassette cassette(
@@ -365,12 +380,12 @@ cassette cassette(
   .tape_stop(tape_stop),
   .tape_rewind(tape_rewind),
   .image_size(tape_size),
-  .sdram_addr(sdram_addr),
-  .sdram_data(sdram_data),
-  .sdram_rd(sdram_rd),
-  .sdram_we(sdram_we),
-  .sdram_wtbt(sdram_wtbt),
-  .sdram_ready(sdram_ready),
+  .sdram_addr(cassette_sdram_addr),
+  .sdram_data({8'd0, tape_buffer_data}),
+  .sdram_rd(),
+  .sdram_we(),
+  .sdram_wtbt(),
+  .sdram_ready(1'b1),
   .tape_bit(adc_cassette_bit),
   .motor(),
   .status()

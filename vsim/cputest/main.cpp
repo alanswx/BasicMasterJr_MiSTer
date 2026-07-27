@@ -14,7 +14,15 @@
 
 #include <verilated.h>
 #include "Vcputb.h"
-#include "Vcputb___024root.h"
+
+// Verilator 4.210+ splits public-flat internals into a root class; older
+// releases keep them directly on Vcputb. Support both generated layouts.
+#if defined(__has_include)
+# if __has_include("Vcputb___024root.h")
+#  include "Vcputb___024root.h"
+#  define VCPUTB_SPLIT_ROOT 1
+# endif
+#endif
 #include "cycles_6800.h"
 
 #include <cstdio>
@@ -45,7 +53,14 @@ static bool pad_on = false;   // --pad runs the core through m6800_pad
 static vluint64_t main_time = 0;
 double sc_time_stamp() { return main_time; }
 
-static inline void poke(unsigned a, uint8_t v) { top->rootp->cputb__DOT__mem[a] = v; }
+static inline void poke(unsigned a, uint8_t v)
+{
+#ifdef VCPUTB_SPLIT_ROOT
+	top->rootp->cputb__DOT__mem[a] = v;
+#else
+	top->cputb__DOT__mem[a] = v;
+#endif
+}
 
 static void tick()
 {
