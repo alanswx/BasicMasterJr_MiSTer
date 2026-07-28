@@ -135,6 +135,14 @@ select them. mRExt
 launched the exact RBF path, `/tmp/CORENAME` reports `BasicMasterJr`, and the
 MiSTer process command line confirms `/media/fat/BasicMasterJr.rbf`.
 
-Open functional work is tracked in `TODO.md`: simulation performance, tape saving,
-printer/expansion hardware, authentic mixed text/graphics composition, MP-9730
-1200-baud tape, MP-1803 floppy, and `wav2cas.py` cleanup.
+The Verilator simulator now uses a timing-equivalent 25 MHz system timebase.
+CPU, video, cassette, keyboard and IRQ-watchdog rates are scaled so emulated
+time is unchanged, while a 120-frame headless run improved from 11.50 s to
+6.37 s on the development host (10.4 to 18.8 fps, about 1.8x). Screenshot
+goldens were refreshed because the asynchronous renderer phase changed; the
+differences were deterministic and confined to scanline zero. The screenshot
+suite, the 256-byte Fast Tape test and all 200 measurable padded CPU opcodes pass.
+
+Open functional work is tracked in `TODO.md`: tape saving, printer/expansion
+hardware, authentic mixed text/graphics composition, MP-9730 1200-baud tape,
+MP-1803 floppy research, and tape-format/tool cleanup.

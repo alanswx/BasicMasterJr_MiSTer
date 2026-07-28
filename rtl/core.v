@@ -3,7 +3,11 @@ module core #(
   // Hardware exposes the MP-1710's 32x24-pixel border around the 256x192
   // machine image. The desktop simulator disables it to retain compact
   // native-resolution regression captures.
-  parameter VIDEO_BORDER = 1
+  parameter VIDEO_BORDER = 1,
+  // The hardware system clock is 50 MHz. The simulator may use a lower
+  // timebase to avoid evaluating idle system-clock cycles, while preserving
+  // timers in real units.
+  parameter SYS_CLK_HZ = 50_000_000
 )(
   input reset,
 
@@ -121,6 +125,7 @@ reg vs_meta, vs_sys;
 reg old_vs;
 wire timer_dis = bank_mode[4];
 wire irq_vector_fetch = cpu_rw & (cpu_addr == 16'hFFF8);
+localparam integer IRQ_WATCHDOG_TICKS = SYS_CLK_HZ * 16 / 1000;
 
 always @(posedge clk_sys) begin
   vs_meta <= vs;
@@ -143,7 +148,7 @@ always @(posedge clk_sys) begin
       // level-triggered IRQ re-enters immediately after RTI and the foreground
       // never runs (typing stops dead). bm2 sidesteps this by injecting a
       // one-shot interrupt rather than driving a level.
-      if (irq_vector_fetch || irq_ack || irq_age == 20'd800000) irq <= 1'b0;
+      if (irq_vector_fetch || irq_ack || irq_age == IRQ_WATCHDOG_TICKS[19:0]) irq <= 1'b0;
     end
   end
 end

@@ -71,16 +71,22 @@ module emu (
 );
 
 //////////////////////////////  CLOCKS  //////////////////////////////////////
-// Real hardware: PLL gives clk_sys = 50 MHz and clk_vid = 10.638297 MHz.
-// 50 / 10.638297 is not an integer, so instead of a divider we run a phase
+// The simulator uses a 25 MHz system timebase instead of the hardware's
+// 50 MHz. This halves the number of Verilator evaluations per emulated second
+// while leaving enough bandwidth for video.v's six-cycle-per-pixel renderer
+// (17.4 MHz minimum at 59 Hz). CPU, video, tape and watchdog rates are scaled
+// to preserve real-machine time.
+//
+// 25 / 10.638297 is not an integer, so instead of a divider we run a phase
 // accumulator: clk_vid toggles when the accumulator wraps. Worst-case jitter
-// is one clk_sys period (20 ns) against a 94 ns half period, which video.v
+// is one clk_sys period (40 ns) against a 94 ns half period, which video.v
 // (a free-running counter) does not care about, and it keeps the real ~59 Hz
 // frame rate so screenshot frame numbers mean the same thing as on hardware.
 // One accumulator carry = one clk_vid EDGE, so the increment carries twice per
 // clk_vid cycle. Getting that factor of 2 wrong ran the whole video side (and
 // therefore every --screenshot / --send-keys frame number) at half speed.
-localparam [31:0] VID_INC = 32'd1_827_645_508;  // round(2 * 10.638297e6 / 50e6 * 2^32)
+localparam integer SIM_CLK_HZ = 25_000_000;
+localparam [31:0] VID_INC = 32'd3_655_291_016;  // round(2 * 10.638297e6 / 25e6 * 2^32)
                                                 // -> 10.6383 MHz, 59.02 Hz frames
 
 reg [31:0] vid_acc = 32'd0;
@@ -94,8 +100,8 @@ end
 // CPU clock enable and default-on fast tape loading, matching BasicMasterJr.sv.
 wire tape_motor;
 wire [31:0] cpu_increment = tape_motor && fast_tape
-	? (32'd64_424_509 << 4)
-	: 32'd64_424_509;
+	? (32'd128_849_019 << 4)
+	: 32'd128_849_019;
 reg [31:0] cpu_acc = 32'd0;
 wire [32:0] cpu_sum = {1'b0, cpu_acc} + {1'b0, cpu_increment};
 wire clk_cpu = cpu_sum[32];
@@ -174,7 +180,7 @@ cassette cassette (
 	.status      ()
 );
 
-core #(.VIDEO_BORDER(0)) core (
+core #(.VIDEO_BORDER(0), .SYS_CLK_HZ(SIM_CLK_HZ)) core (
 	.reset      (core_reset),
 	.clk_sys    (clk_sys),
 	.clk_cpu    (clk_cpu),

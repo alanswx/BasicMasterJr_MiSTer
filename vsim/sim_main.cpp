@@ -47,9 +47,13 @@
 #define VGA_WIDTH  256
 #define VGA_HEIGHT 192
 
-// clk_sys ticks to hold reset at power-on. The core needs long enough for the
-// $readmemh ROMs to be visible and for the 6800 to fetch its reset vector.
-#define INITIAL_RESET_TICKS 2000
+// sim.v deliberately uses a 25 MHz timebase to reduce Verilator work while
+// preserving the machine's real CPU/video/tape rates.
+#define SIM_CLK_HZ 25000000u
+
+// 40 us power-on reset. The core needs long enough for the $readmemh ROMs to
+// be visible and for the 6800 to fetch its reset vector.
+#define INITIAL_RESET_TICKS (SIM_CLK_HZ / 25000u)
 
 vluint64_t main_time = 0;
 double sc_time_stamp() { return main_time; }
@@ -67,12 +71,12 @@ bool trace_cpu          = false;
 bool trace_io           = false;
 bool trace_tape         = false;
 bool trace_key          = false;
-// Hold time for each injected key edge, in clk_sys cycles (20 ns each).
+// Hold time for each injected key edge, in simulated clk_sys cycles (40 ns each).
 // The BASIC keyboard scan only advances a few matrix columns per millisecond,
 // so a key has to be held for tens of ms to be seen -- this is the same
 // "keyboard eats inputs if typed fast" behaviour MAME notes for this machine.
-unsigned int key_hold_cycles = 1500000;   // 30 ms
-unsigned int tape_bit_period = 166667;   // 50 MHz / 300 baud, the real rate
+unsigned int key_hold_cycles = SIM_CLK_HZ * 30 / 1000; // 30 ms
+unsigned int tape_bit_period = SIM_CLK_HZ / 300;       // 300 baud
 bool fast_tape = true;
 int  stop_at_frame      = -1;
 std::vector<int> screenshot_frames;
@@ -350,7 +354,7 @@ static void tape_trace()
 		if (last_addr != 0xFFFFFFFFu)
 			printf("[tape] byte[%u] = $%02X  %.3f ms since previous\n",
 			       last_addr, top->dbg_tape_byte,
-			       (main_time - last_t) / 50000.0);
+			       (main_time - last_t) / (SIM_CLK_HZ / 1000.0));
 		last_t = main_time;
 		last_addr = top->dbg_tape_addr;
 	}
@@ -362,7 +366,7 @@ static void tape_trace()
 	if (top->dbg_tape_bit != last_serial) {
 		if (last_serial < 2 && edge_count++ < 30)
 			printf("[tape] line %d for %.3f ms\n", last_serial,
-			       (main_time - serial_since) / 50000.0);
+			       (main_time - serial_since) / (SIM_CLK_HZ / 1000.0));
 		last_serial = top->dbg_tape_bit;
 		serial_since = main_time;
 	}
@@ -434,7 +438,7 @@ static int verilate()
 		// Sanity: report the measured CPU clock once, a second in.
 		static uint64_t cpu_edges = 0;
 		if (top->dbg_cpu_ce) cpu_edges++;
-		if (main_time == 50000000ull)
+		if (main_time == SIM_CLK_HZ)
 			printf("[clk] CPU clock measured: %llu Hz over 1.000 s\n",
 			       (unsigned long long)cpu_edges);
 
@@ -547,8 +551,8 @@ int main(int argc, char** argv, char** env)
 		else if (a == "--trace-io")          trace_io = true;
 		else if (a == "--trace-tape")        trace_tape = true;
 		else if (a == "--trace-key")         trace_key = true;
-		else if (a == "--key-hold")          key_hold_cycles = (unsigned)(atof(next("--key-hold").c_str()) * 50000.0);
-		else if (a == "--tape-baud")         tape_bit_period = (unsigned)(50000000.0 / atof(next("--tape-baud").c_str()));
+		else if (a == "--key-hold")          key_hold_cycles = (unsigned)(atof(next("--key-hold").c_str()) * (SIM_CLK_HZ / 1000.0));
+		else if (a == "--tape-baud")         tape_bit_period = (unsigned)(SIM_CLK_HZ / atof(next("--tape-baud").c_str()));
 		else if (a == "--tape-bit-period")   tape_bit_period = (unsigned)atoi(next("--tape-bit-period").c_str());
 		else if (a == "--fast-tape") {
 			std::string value = next("--fast-tape");
