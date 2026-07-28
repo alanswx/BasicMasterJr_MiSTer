@@ -8,3 +8,4 @@ set_clock_groups -asynchronous -group $clk_system -group $clk_video
 set_false_path -to {*|core:core|vs_meta}
 set_false_path -to {*|core:core|video:video|mix_phase_meta}
 set_false_path -to {*|core:core|video:video|blink_meta}
+set_false_path -to {*|core:core|video:video|border_color_meta[*]}

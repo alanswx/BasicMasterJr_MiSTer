@@ -174,7 +174,7 @@ cassette cassette (
 	.status      ()
 );
 
-core core (
+core #(.VIDEO_BORDER(0)) core (
 	.reset      (core_reset),
 	.clk_sys    (clk_sys),
 	.clk_cpu    (clk_cpu),

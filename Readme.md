@@ -8,14 +8,23 @@ colour adapter, Kansas City Standard cassette at 300 baud.
 BREAK key (NMI), 5-bit DAC sound, and **cassette loading** — a real tape image loads
 byte-exact and the program runs.
 
-**Not finished:** graphics-mode scanline placement is wrong, tape *saving* is not
-implemented, and one CPU opcode is still a clock out. See [TODO.md](TODO.md).
+**Not finished:** tape *saving*, printer/expansion hardware, authentic mixed-mode
+composition, and the optional MP-9730 cassette and MP-1803 floppy adapters. See
+[TODO.md](TODO.md) for the ordered roadmap.
 
-**Hardware verified:** the Quartus 17.0.2 release boots with stable HDMI at
-256x192, accepts keyboard input, mounts a tape through MiSTer, loads MAZY
-byte-for-byte, and runs it at `$1000`.
+**Hardware verified:** the Quartus 17.0.2 release boots with stable HDMI, accepts
+keyboard input, mounts a tape through MiSTer, loads MAZY byte-for-byte, and runs it
+at `$1000`. The current build wraps the native 256x192 image in the MP-1710's
+320x240 bordered output and adds MiSTer video mixing; those new display modes need a
+final visual check.
 
 ---
+
+## Video options
+
+The active picture is 320x240: the Basic Master Jr.'s native 256x192 image plus the
+MP-1710's 32x24 border on each axis. The OSD offers **Scandoubler Fx** choices for
+None, HQ2x, and CRT 25%/50%/75% scanlines. MiSTer gamma profiles are supported.
 
 ## Loading tapes
 

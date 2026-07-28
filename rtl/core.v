@@ -1,5 +1,10 @@
 
-module core(
+module core #(
+  // Hardware exposes the MP-1710's 32x24-pixel border around the 256x192
+  // machine image. The desktop simulator disables it to retain compact
+  // native-resolution regression captures.
+  parameter VIDEO_BORDER = 1
+)(
   input reset,
 
   input clk_sys,
@@ -69,7 +74,7 @@ wire [15:0] video_ram_addr;
 wire [7:0] video_ram_data;
 wire [10:0] video_char_addr;
 
-video video(
+video #(.BORDER(VIDEO_BORDER)) video(
   .clk_sys(clk_sys),
   .clk_vid(clk_vid),
   .hs(hs),
@@ -89,6 +94,7 @@ video video(
   .char_data(rom0_dout),
   .color_board(mp1710on),
   .inverted(xor_disp[7]),
+  .border_color(xor_disp[7] ? bckreg[6:4] : bckreg[2:0]),
   .screen_mode(screen_mode),
   .charcolor(charcolor),
   .color_ram_addr(cpu_addr[9:0] - 10'h100),
@@ -242,7 +248,7 @@ reg [7:0] charcolor;
 reg [7:0] color_board;
 reg       mp1710on;     // set once $E892 has been written: colour adapter present
 reg [7:0] bank_mode;    // $EFD0, read back verbatim
-reg [7:0] bckreg;       // $E891, MP-1710 screen background colour
+reg [7:0] bckreg;       // $E891, MP-1710 screen background / border colour
 reg [7:0] screen_mode;  // $EFE0
 reg       kb_nmi_en;
 reg       irq_ack;      // pulses when the handler reads $EF40

@@ -179,7 +179,6 @@ assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign SDRAM_CLK = clk_sys;
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
 
-assign VGA_SL = 0;
 assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
 assign HDMI_FREEZE = 0;
@@ -212,6 +211,7 @@ localparam CONF_STR = {
 	"F1,BIN,Load Tape;",
 	"-;",
 	"O[118],Fast tape loading,On,Off;",
+	"O[117:115],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -221,6 +221,7 @@ localparam CONF_STR = {
 };
 
 wire forced_scandoubler;
+wire [21:0] gamma_bus;
 wire   [1:0] buttons;
 wire [127:0] status;
 wire  [10:0] ps2_key;
@@ -237,7 +238,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
 	.EXT_BUS(),
-	.gamma_bus(),
+	.gamma_bus(gamma_bus),
 
 	.forced_scandoubler(forced_scandoubler),
 
@@ -263,7 +264,7 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(clk_sys),
-	.outclk_1(clk_vid) // 5.320*2
+	.outclk_1(clk_vid) // 25 MHz video_mixer master; 4 clocks per pixel
 );
 
 
@@ -425,14 +426,40 @@ keyboard keyboard(
 );
 
 assign CLK_VIDEO = clk_vid;
-assign CE_PIXEL = ce_pix;
 
-assign VGA_DE = ~(hb | vb);
-assign VGA_HS = hs;
-assign VGA_VS = vs;
-assign VGA_G  = red;
-assign VGA_R  = green;
-assign VGA_B  = blue;
+wire [2:0] video_fx = status[117:115];
+wire [2:0] scanline_fx = video_fx ? video_fx - 3'd1 : 3'd0;
+wire scandoubler = forced_scandoubler | (video_fx != 3'd0);
+assign VGA_SL = scanline_fx[1:0];
+
+video_mixer #(
+  .LINE_LENGTH(324),
+  .HALF_DEPTH(0),
+  .GAMMA(1)
+) video_mixer (
+  .CLK_VIDEO(clk_vid),
+  .ce_pix(ce_pix),
+  .CE_PIXEL(CE_PIXEL),
+  .scandoubler(scandoubler),
+  .hq2x(video_fx == 3'd1),
+  .gamma_bus(gamma_bus),
+  // Preserve the board's established red/green mapping.
+  .R(green),
+  .G(red),
+  .B(blue),
+  .HSync(hs),
+  .VSync(vs),
+  .HBlank(hb),
+  .VBlank(vb),
+  .HDMI_FREEZE(1'b0),
+  .freeze_sync(),
+  .VGA_R(VGA_R),
+  .VGA_G(VGA_G),
+  .VGA_B(VGA_B),
+  .VGA_VS(VGA_VS),
+  .VGA_HS(VGA_HS),
+  .VGA_DE(VGA_DE)
+);
 
 
 endmodule

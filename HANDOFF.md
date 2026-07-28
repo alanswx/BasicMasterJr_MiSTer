@@ -1,4 +1,4 @@
-# Handoff — fast tape loading verified on MiSTer
+# Handoff — timing-clean border/video-mixer build
 
 Date: 2026-07-27. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
 
@@ -18,7 +18,32 @@ The core now works on physical MiSTer hardware:
 The installed test MGL is `/media/fat/.LASTLAUNCH.mgl`; its tape is
 `/media/fat/games/BasicMasterJr/mazy.s.bin`.
 
+## Current development build
+
+The 2026-07-27 build adds three completed roadmap items:
+
+- Extended `JMP` (`$7E`) now takes exactly three 6800 clocks. The padded CPU suite reports all 200 measurable legal opcodes exact.
+- `$E891` now colors a 32-pixel horizontal and 24-line vertical MP-1710 border around the unchanged 256x192 machine image, producing 320x240 active video. Screen reverse selects the opposite color nibble, matching bm2.
+- Video now passes through MiSTer `video_mixer`, with forced scandoubling, HQ2x, CRT 25%/50%/75% scanlines, and gamma support. A 25 MHz video master provides four clocks per 6.25 MHz input pixel.
+
+The border/video-mixer build was exercised on the MiSTer at `192.168.1.198`:
+HDMI locked at 320x240 and `POKE 59537,7` changed the border to white. The
+hardware screenshot endpoint also exposed a one-column character-rendering
+regression. The corrected RBF described below has been rebuilt but has not yet
+been installed on the MiSTer. The prior timing-clean build remains backed up as
+`/media/fat/BasicMasterJr.pre-border-mixer.rbf`.
+
 ## Bugs fixed
+
+### Character first-column rendering
+
+The dual-port system RAM registers both its video-port address and output. The
+pixel renderer originally waited only one cycle at each character boundary, so
+the first column used the preceding character code. This removed the left stroke
+from ROM glyphs whose bit 7 is set, most visibly A, M, and V. The renderer now
+waits for both RAM stages before starting the character-ROM lookup. All five
+screenshot goldens were refreshed; their changes are confined to that formerly
+stale character-cell column.
 
 ### Hardware CPU clock
 
@@ -72,11 +97,11 @@ Build command:
 ~/intelFPGA_lite/quartus/bin/quartus_sh --flow compile BasicMasterJr
 ```
 
-The timing-clean release build completes with 0 errors and 53 warnings. TimeQuest
-passes with +0.527 ns worst setup slack and +0.201 ns worst hold slack. The system
-and video PLL outputs are declared asynchronous, matching the explicit two-flop
+The glyph-fixed border/mixer build completes with 0 errors and 53 warnings.
+TimeQuest passes with +0.718 ns worst setup slack and +0.245 ns worst hold slack. The system and
+video PLL outputs are declared asynchronous, matching the explicit two-flop
 synchronizers and true dual-clock framebuffer at their boundaries. The RBF SHA-256
-is `da8ad7bc64f9c883597d140894a680ca7ebbb56a2e5553f2b7e4d7c744970a46`.
+is `ddc6d711064f7a59e904bd98ca06b2c00900bc57522d25262a076b324c31c755`.
 
 The remaining warnings are benign MiSTer/Quartus artifacts: inferred-ROM write
 pins, generated PLL nodes optimized away, deliberately idle SDRAM/ADC pins,
@@ -101,11 +126,12 @@ external-SDRAM tape path. Tape images are limited to 64 KiB.
 
 ## Remaining work
 
-The timing-passing RBF is installed as `/media/fat/BasicMasterJr.rbf`; the prior
-release is recoverable as `/media/fat/BasicMasterJr.pre-timing-cleanup.rbf`. mRExt
-launched `.LASTLAUNCH.mgl` and `/tmp/CORENAME` reports `BasicMasterJr`. Its screenshot
-API returned an empty record, so this build still needs a human HDMI visual check.
+The previous border/mixer RBF is installed as `/media/fat/BasicMasterJr.rbf`; the
+immediately prior release is recoverable as
+`/media/fat/BasicMasterJr.pre-border-mixer.rbf`. The glyph-fixed RBF is currently
+`output_files/BasicMasterJr.rbf` and still needs hardware installation/testing.
+mRExt launched `.LASTLAUNCH.mgl`, and `/tmp/CORENAME` reports `BasicMasterJr`.
 
-Open functional work is tracked in `TODO.md`: one-cycle-long extended `JMP`, tape
-saving, printer/expansion hardware, MP-1803 floppy, MP-9730 1200-baud tape, visible
-MP-1710 border color, and confirmation of the real mixed text/graphics behavior.
+Open functional work is tracked in `TODO.md`: simulation performance, tape saving,
+printer/expansion hardware, authentic mixed text/graphics composition, MP-9730
+1200-baud tape, MP-1803 floppy, and `wav2cas.py` cleanup.

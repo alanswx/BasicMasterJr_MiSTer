@@ -1,5 +1,7 @@
 
-module video(
+module video #(
+  parameter BORDER = 1
+)(
   input clk_sys,
   input clk_vid,
 
@@ -25,6 +27,7 @@ module video(
 
   input color_board,
   input inverted,
+  input [2:0] border_color,
 
   // $EFE0. bit6 = graphics enabled, bit7 = graphics ONLY (clear = mixed with
   // text), bits[3:0] = page. Both $40-$4F (mixed) and $C0-$CF (graphics only)
@@ -41,7 +44,19 @@ module video(
 
 );
 
-// 256x192
+// Native picture: 256x192. With the MP-1710 border enabled, expose bm2's
+// documented 32 pixels on each side and 24 lines above/below as a 320x240
+// active frame. The framebuffer remains native-sized.
+localparam ACTIVE_W = BORDER ? 320 : 256;
+localparam ACTIVE_H = BORDER ? 240 : 192;
+localparam H_TOTAL  = BORDER ? 400 : 344;
+localparam H_FP     = BORDER ? 16  : 16;
+localparam H_SYNC   = BORDER ? 40  : 40;
+localparam V_TOTAL  = BORDER ? 262 : 262;
+localparam V_FP     = BORDER ? 4   : 24;
+localparam V_SYNC   = BORDER ? 3   : 34;
+localparam X_OFF    = BORDER ? 32  : 0;
+localparam Y_OFF    = BORDER ? 24  : 0;
 
 initial begin
   hs = 1'b1;
@@ -102,8 +117,12 @@ wire [2:0] render_color = color_board ? (render_bit ? fg : bg)
                                           (inverted ? 3'b000 : 3'b111) :
                                           (inverted ? 3'b111 : 3'b000));
 
-wire [15:0] scan_addr = (hcount < 9'd256 && vcount < 9'd192)
-                        ? {vcount[7:0], hcount[7:0]} : 16'd0;
+wire in_picture = (hcount >= X_OFF) && (hcount < X_OFF + 256)
+               && (vcount >= Y_OFF) && (vcount < Y_OFF + 192);
+wire [8:0] picture_x = hcount - (BORDER ? 9'd32 : 9'd0);
+wire [8:0] picture_y = vcount - (BORDER ? 9'd24 : 9'd0);
+wire [15:0] scan_addr = in_picture
+                        ? {picture_y[7:0], picture_x[7:0]} : 16'd0;
 wire [2:0] vram_data;
 reg [2:0] scan_data;
 
@@ -126,25 +145,31 @@ always @(posedge clk_sys) begin
   case (state)
     3'd0: begin
       // Graphics mode reads the bitmap directly; text mode reads the character
-      // code and looks it up in the generator on the next state.
+      // code and looks it up in the generator after the RAM read completes.
       ram_addr <= show_gfx ? (gfx_base + {3'd0, py[7:3], 8'd0} + {8'd0, py[2:0], 5'd0} + {11'd0, px[7:3]})
                            : (16'h100 + { 6'd0, cell_idx });
       state <= 3'd1;
     end
     3'd1: begin
-      // Wait for the synchronous system-RAM read port.
+      // Port B of dpram registers both its address and output.
       state <= 3'd2;
     end
     3'd2: begin
-      char_addr <= { ram_data, py[2:0] };
-      pattern <= ram_data;
+      // Wait for the second system-RAM read stage. Without this cycle, px=0
+      // of every cell uses the preceding character code and loses bit 7 of
+      // glyphs such as A, M, and V.
       state <= 3'd3;
     end
     3'd3: begin
-      // Wait for the synchronous character-ROM read port.
+      char_addr <= { ram_data, py[2:0] };
+      pattern <= ram_data;
       state <= 3'd4;
     end
     3'd4: begin
+      // Wait for the synchronous character-ROM read port.
+      state <= 3'd5;
+    end
+    3'd5: begin
       px <= px + 8'd1;
       if (px == 255) begin
         py <= py + 8'd1;
@@ -160,8 +185,16 @@ end
 // Display scan
 // ---------------------------------------------------------------------------
 reg [5:0] blink_div;
+reg pixel_subphase = 1'b0;
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+reg [2:0] border_color_meta, border_color_vid;
 
 always @(posedge clk_vid) begin
+
+  border_color_meta <= border_color;
+  border_color_vid  <= border_color_meta;
+  pixel_subphase <= ~pixel_subphase;
+  if (!BORDER || pixel_subphase) begin
 
   frame <= 1'b0;
   ce_pix <= ~ce_pix;
@@ -176,25 +209,25 @@ always @(posedge clk_vid) begin
   else begin
 
     if (~(hb|vb)) begin
-      red <= scan_data[2] ? 8'hff : 8'd0;
-      green <= scan_data[1] ? 8'hff : 8'd0;
-      blue <= scan_data[0] ? 8'hff : 8'd0;
+      red <= (in_picture ? scan_data[2] : border_color_vid[2]) ? 8'hff : 8'd0;
+      green <= (in_picture ? scan_data[1] : border_color_vid[1]) ? 8'hff : 8'd0;
+      blue <= (in_picture ? scan_data[0] : border_color_vid[0]) ? 8'hff : 8'd0;
     end
 
     hcount <= hcount + 9'd1;
     case (hcount)
-      255: hb <= 1'b1;
-      271: hs <= 1'b0;
-      311: hs <= 1'b1;
-      343: begin
+      ACTIVE_W-1: hb <= 1'b1;
+      ACTIVE_W+H_FP-1: hs <= 1'b0;
+      ACTIVE_W+H_FP+H_SYNC-1: hs <= 1'b1;
+      H_TOTAL-1: begin
         vcount <= vcount + 9'd1;
         hcount <= 9'b0;
         hb <= 1'b0;
         case (vcount)
-          191: vb <= 1'b1;
-          215: vs <= 1'b0;
-          249: vs <= 1'b1;
-          261: begin
+          ACTIVE_H-1: vb <= 1'b1;
+          ACTIVE_H+V_FP-1: vs <= 1'b0;
+          ACTIVE_H+V_FP+V_SYNC-1: vs <= 1'b1;
+          V_TOTAL-1: begin
             vcount <= 9'd0;
             vb <= 1'b0;
             frame <= 1'b1;
@@ -212,6 +245,7 @@ always @(posedge clk_vid) begin
 
   end
 
+  end
 end
 
 endmodule

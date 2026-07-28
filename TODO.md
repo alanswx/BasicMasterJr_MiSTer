@@ -18,15 +18,18 @@ cd vsim/ && ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY  # + run it,
 cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 ```
 
----
+## Implementation order
 
-## P0 — open
-
-- [ ] **`JMP` extended (`$7E`) runs 1 clock long.** The only remaining cycle
-      inaccuracy: 4 clocks against the 6800's 3. `rtl/m6800_pad.v` can add clocks
-      but not remove them, so this needs the same kind of state-machine fix that
-      the accumulator-B ops got (drop a state). Everything else measurable is
-      exact — see "CPU cycle accuracy" below.
+1. [x] Fix extended `JMP` (`$7E`) timing. It now completes in the 6800's three clocks; the complete padded CPU suite has no measurable fast or slow legal opcodes.
+2. [x] Render the MP-1710 `$E891` background color as bm2's 32x24 border around the native 256x192 image.
+3. [ ] Revalidate and optimize simulation performance after the dual-port framebuffer work.
+4. [ ] Implement tape saving: `$EE80` bit 0, recording, and MiSTer upload/retrieval.
+5. [x] Integrate MiSTer `video_mixer`: forced scandoubling, HQ2x, CRT scanlines, and gamma.
+6. [ ] Implement printer output, then the `$E800-$E803` expansion PIA; settle the `$E800-$EDFF` mapping while doing this.
+7. [ ] Research real hardware and implement authentic mixed text+graphics composition.
+8. [ ] Add MP-9730 1200-baud cassette support, using `bmtape2` as the format reference.
+9. [ ] Add MP-1803 floppy adapter support.
+10. [ ] Standardize or retire `wav2cas.py` in favor of `bmtape2`.
 
 ---
 
@@ -35,8 +38,9 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 P0 build/correctness (`sdram_wtbt` double drive, `$EFD0` read/write inversion,
 colour RAM written on reads, 1-bit attribute latch), the whole P1 cassette list,
 the 750 kHz CPU clock, IRQ/NMI, the 5-bit DAC, `$EFE0` mode decode, blink
-attributes and `$E891`, the keyboard rewrite, and default-on 16x fast tape
-loading. Three extra bugs were found and
+attributes and `$E891`, the visible MP-1710 border, the keyboard rewrite,
+default-on 16x fast tape loading, cycle-correct extended `JMP`, and MiSTer
+`video_mixer` support. Three extra bugs were found and
 fixed along the way:
 
 * **The renderer clock-domain crossing and graphics pipeline were rebuilt.** The
@@ -64,8 +68,6 @@ fixed along the way:
 - [ ] **MP-1803 floppy adapter** and **MP-9730 1200-baud cassette** support. Neither
       MAME nor bm2 emulates these fully; `bmtape2` is the reference for the 1200-baud
       tape format.
-- [ ] **Visible MP-1710 border/background color.** `$E891` stores and reads back
-      the value, but the renderer does not yet use `bckreg` outside the 256x192 image.
 - [ ] **Authentic mixed text+graphics composition.** `$40-$4F` is supported using
       bm2's alternating-frame approximation; the real hardware overlay/interlace
       behavior remains unresolved.
@@ -79,9 +81,6 @@ fixed along the way:
 - [ ] `wav2cas.py` has three different sample rates in one file (docstring 19200,
       function default 8000, `main()` default 19200). Settle it once the RTL rate is
       settled — or retire it in favour of `bmtape2`.
-
-- [ ] No `video_mixer` in `BasicMasterJr.sv`: no scandoubler, scanlines, or gamma in
-      the OSD, and analog VGA users get a raw 15 kHz signal.
 
 ---
 

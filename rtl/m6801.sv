@@ -63,7 +63,7 @@ typedef enum logic[5:0] {reset_accb, load_accb, pull_accb, latch_accb } accb_typ
 typedef enum logic[5:0] {reset_cc, load_cc, pull_cc, latch_cc } cc_type;
 typedef enum logic[5:0] {reset_ix, load_ix, pull_lo_ix, pull_hi_ix, latch_ix } ix_type;
 typedef enum logic[5:0] {reset_sp, latch_sp, load_sp } sp_type;
-typedef enum logic[5:0] {reset_pc, latch_pc, load_ea_pc, add_ea_pc, pull_lo_pc, pull_hi_pc, inc_pc } pc_type;
+typedef enum logic[5:0] {reset_pc, latch_pc, load_ea_pc, load_ext_pc, add_ea_pc, pull_lo_pc, pull_hi_pc, inc_pc } pc_type;
 typedef enum logic[5:0] {reset_md, latch_md, load_md, fetch_first_md, fetch_next_md, shiftl_md } md_type;
 typedef enum logic[5:0] {reset_ea, latch_ea, add_ix_ea, load_accb_ea, inc_ea, fetch_first_ea, fetch_next_ea } ea_type;
 typedef enum logic[5:0] {reset_iv, latch_iv, swi_iv, nmi_iv, irq_iv, icf_iv, ocf_iv, tof_iv, sci_iv } iv_type;
@@ -249,6 +249,12 @@ begin
      temppc = 16'b1111111111111110;
   load_ea_pc:
      temppc = ea;
+  // During the last cycle of an extended address fetch, ea[7:0] still holds
+  // the first (high) operand byte and data_in is the second (low) byte. JMP
+  // can therefore load its destination immediately instead of spending an
+  // otherwise idle fourth cycle in jmp_state.
+  load_ext_pc:
+     temppc = {ea[7:0], data_in};
   pull_lo_pc:
   begin
      temppc[7:0] = data_in;
@@ -2579,8 +2585,10 @@ always @(*)
                 case (op_code[3:0])
                  4'b1011: // undefined
                       next_state = fetch_state;
-                 4'b1110: // jmp
-                      next_state = jmp_state;
+                 4'b1110: begin // jmp -- complete in this third clock
+                      pc_ctrl = load_ext_pc;
+                      next_state = fetch_state;
+                 end
                  default:
                       next_state = read8_state;
                  endcase

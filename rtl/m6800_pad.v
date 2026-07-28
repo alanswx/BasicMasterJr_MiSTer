@@ -16,10 +16,8 @@
 //     cd vsim/cputest && make && ./obj_dir/Vcputb --table
 //     cp m6800_pad_table.vh ../../rtl/
 //
-// Known gap: 21 opcodes (JMP extended, and the accumulator-B direct and
-// extended ALU ops) run one clock LONGER than a 6800 because the core routes
-// them through an extra execute_state that the accumulator-A equivalents skip.
-// Stalling cannot remove a cycle, so those stay 1 over. See TODO.md.
+// The underlying core's formerly slow paths have been corrected in its state
+// machine. Padding here now only needs to add clocks to faster 6801 opcodes.
 
 module m6800_pad (
   input             clk,

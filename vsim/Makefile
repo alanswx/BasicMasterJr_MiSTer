@@ -10,13 +10,14 @@ V_INC =
 # make Verilator auto-load modules outside this explicit source list.
 #
 # PINMISSING is expected: core.v deliberately leaves video.v's hcount/vcount/
-# frame outputs unconnected.
+# frame outputs unconnected. UNSIGNED is expected when VIDEO_BORDER=0 makes
+# lower-bound comparisons against constant zero tautological.
 # +incdir+ only (NOT -I): m6800_pad.v needs to find m6800_pad_table.vh, but
 # -I would also put ../rtl on the module search path and bypass that override.
 V_DEFINE = +define+SIMULATION=1 +incdir+$(RTL) \
 	-CFLAGS "-I../sim/imgui -I../sim/vinc -I../sim/ -g" \
 	--timescale-override 1ps/1ps \
-	-Wno-TIMESCALEMOD -Wno-PINMISSING -Wno-fatal
+	-Wno-TIMESCALEMOD -Wno-PINMISSING -Wno-UNSIGNED -Wno-fatal
 
 # VCD tracing costs runtime even when idle; opt in with `make TRACE=1`.
 ifeq ($(TRACE),1)

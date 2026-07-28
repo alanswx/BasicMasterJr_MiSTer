@@ -10,8 +10,9 @@ Kansas City Standard cassette at 300 baud.
 
 BASIC and the monitor boot, and **tape loading works end to end** — a real tape image
 loads byte-exact and the program runs. Sound, interrupts, the `$EFE0` graphics modes
-and blink attributes are in. See **TODO.md** for what is still open (graphics scanline
-interleave, CPU cycle accuracy) and **ref/notes/** for the hardware research.
+and blink attributes, MP-1710 border, cycle-exact measurable CPU timing, and MiSTer
+video mixing are in. See **TODO.md** for the ordered remaining work and **ref/notes/**
+for the hardware research.
 
 Target is real hardware. Keep everything FPGA-friendly: no unsynthesisable constructs,
 prefer clock enables over gated clocks, and remember that some signals here named
@@ -145,7 +146,8 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # 199 exact, 1 too slow
 The reference is MAME's `cycles_6800[]`, extracted by `extract_cycles.py`.
 `rtl/m6800_pad.v` stalls the core's `cen` per opcode to make up the deficit;
 `rtl/m6800_pad_table.vh` is **generated**, so re-run `--table` after any change to
-the CPU core. `JMP` extended is still 1 clock long — padding cannot remove cycles.
+the CPU core. Extended `JMP` now has its state-machine fix; the padded harness reports
+all 200 measurable legal opcodes exact.
 
 ## Hardware reference — read this before changing behaviour
 
