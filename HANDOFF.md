@@ -29,9 +29,10 @@ The 2026-07-27 build adds three completed roadmap items:
 The border/video-mixer build was exercised on the MiSTer at `192.168.1.198`:
 HDMI locked at 320x240 and `POKE 59537,7` changed the border to white. The
 hardware screenshot endpoint also exposed a one-column character-rendering
-regression. The corrected RBF described below has been rebuilt but has not yet
-been installed on the MiSTer. The prior timing-clean build remains backed up as
-`/media/fat/BasicMasterJr.pre-border-mixer.rbf`.
+regression. The corrected RBF described below is installed and hardware-tested:
+A, M, and V match the ROM glyphs, HDMI remains locked at 320x240, and
+`POKE 59537,7` produces a white border around the black 256x192 picture. The
+pre-fix image remains backed up as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf`.
 
 ## Bugs fixed
 
@@ -41,9 +42,10 @@ The dual-port system RAM registers both its video-port address and output. The
 pixel renderer originally waited only one cycle at each character boundary, so
 the first column used the preceding character code. This removed the left stroke
 from ROM glyphs whose bit 7 is set, most visibly A, M, and V. The renderer now
-waits for both RAM stages before starting the character-ROM lookup. All five
-screenshot goldens were refreshed; their changes are confined to that formerly
-stale character-cell column.
+waits for both RAM stages before starting the character-ROM lookup, and the
+framebuffer write enable follows the new final renderer state. All five screenshot
+goldens were refreshed; their changes are confined to that formerly stale
+character-cell column.
 
 ### Hardware CPU clock
 
@@ -98,10 +100,10 @@ Build command:
 ```
 
 The glyph-fixed border/mixer build completes with 0 errors and 53 warnings.
-TimeQuest passes with +0.718 ns worst setup slack and +0.245 ns worst hold slack. The system and
+TimeQuest passes with +0.218 ns worst setup slack and +0.249 ns worst hold slack. The system and
 video PLL outputs are declared asynchronous, matching the explicit two-flop
 synchronizers and true dual-clock framebuffer at their boundaries. The RBF SHA-256
-is `ddc6d711064f7a59e904bd98ca06b2c00900bc57522d25262a076b324c31c755`.
+is `cee0eb4b1a7d10b6be1fcd1c325e60a7850b513fc853a30ea2dfdaa46492a1e9`.
 
 The remaining warnings are benign MiSTer/Quartus artifacts: inferred-ROM write
 pins, generated PLL nodes optimized away, deliberately idle SDRAM/ADC pins,
@@ -126,11 +128,10 @@ external-SDRAM tape path. Tape images are limited to 64 KiB.
 
 ## Remaining work
 
-The previous border/mixer RBF is installed as `/media/fat/BasicMasterJr.rbf`; the
-immediately prior release is recoverable as
-`/media/fat/BasicMasterJr.pre-border-mixer.rbf`. The glyph-fixed RBF is currently
-`output_files/BasicMasterJr.rbf` and still needs hardware installation/testing.
-mRExt launched `.LASTLAUNCH.mgl`, and `/tmp/CORENAME` reports `BasicMasterJr`.
+The glyph-fixed RBF is installed as `/media/fat/BasicMasterJr.rbf`; the pre-fix
+release is recoverable as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf`. mRExt
+launched the exact RBF path, `/tmp/CORENAME` reports `BasicMasterJr`, and the
+MiSTer process command line confirms `/media/fat/BasicMasterJr.rbf`.
 
 Open functional work is tracked in `TODO.md`: simulation performance, tape saving,
 printer/expansion hardware, authentic mixed text/graphics composition, MP-9730

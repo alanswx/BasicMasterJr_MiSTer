@@ -128,7 +128,7 @@ reg [2:0] scan_data;
 
 video_framebuffer framebuffer(
   .wr_clk(clk_sys),
-  .wr_en(state == 3'd4),
+  .wr_en(state == 3'd5),
   .wr_addr({py, px}),
   .wr_data(render_color),
   .rd_clk(clk_vid),
