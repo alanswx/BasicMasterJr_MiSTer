@@ -32,7 +32,7 @@ hardware screenshot endpoint also exposed a one-column character-rendering
 regression. The corrected RBF described below is installed and hardware-tested:
 A, M, and V match the ROM glyphs, HDMI remains locked at 320x240, and
 `POKE 59537,7` produces a white border around the black 256x192 picture. The
-pre-fix image remains backed up as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf`.
+pre-fix image remains backed up as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf.bak`.
 
 ## Bugs fixed
 
@@ -129,7 +129,9 @@ external-SDRAM tape path. Tape images are limited to 64 KiB.
 ## Remaining work
 
 The glyph-fixed RBF is installed as `/media/fat/BasicMasterJr.rbf`; the pre-fix
-release is recoverable as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf`. mRExt
+release is recoverable as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf.bak`. All
+backup images use the `.rbf.bak` suffix so the MGL's name-only core lookup cannot
+select them. mRExt
 launched the exact RBF path, `/tmp/CORENAME` reports `BasicMasterJr`, and the
 MiSTer process command line confirms `/media/fat/BasicMasterJr.rbf`.
 
