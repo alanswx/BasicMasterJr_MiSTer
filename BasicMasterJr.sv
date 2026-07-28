@@ -208,8 +208,9 @@ localparam CONF_STR = {
 	"-;",
 	// The extension field is 3-character extensions concatenated, so "Tape"
 	// was malformed (read as "Tap" plus a stray "e"). Tape images are .bin.
-	"F1,BIN,Load Tape;",
+	"FS1,BMTBINSAV,Load / record tape;",
 	"-;",
+	"T[119],New tape recording;",
 	"O[118],Fast tape loading,On,Off;",
 	"O[117:115],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
@@ -232,6 +233,17 @@ wire  [7:0] ioctl_index;
 wire ioctl_wr;
 wire ioctl_download;
 wire ioctl_wait;
+wire [31:0] sd_lba[1];
+wire        sd_rd = 1'b0;
+reg         sd_wr = 1'b0;
+wire        sd_ack;
+wire [13:0] sd_buff_addr;
+wire  [7:0] sd_buff_dout;
+wire  [7:0] sd_buff_din[1];
+wire        sd_buff_wr;
+wire        img_mounted;
+wire        img_readonly;
+wire [63:0] img_size;
 
 hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
@@ -253,7 +265,19 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ioctl_addr(ioctl_addr),
 	.ioctl_dout(ioctl_dout),
 	.ioctl_wait(ioctl_wait),
-	.ioctl_index(ioctl_index)
+	.ioctl_index(ioctl_index),
+
+	.sd_lba(sd_lba),
+	.sd_rd(sd_rd),
+	.sd_wr(sd_wr),
+	.sd_ack(sd_ack),
+	.sd_buff_addr(sd_buff_addr),
+	.sd_buff_dout(sd_buff_dout),
+	.sd_buff_din(sd_buff_din),
+	.sd_buff_wr(sd_buff_wr),
+	.img_mounted(img_mounted),
+	.img_readonly(img_readonly),
+	.img_size(img_size)
 );
 
 ///////////////////////   CLOCKS   ///////////////////////////////
@@ -308,6 +332,8 @@ wire [4:0] dac_level;
 wire [24:0] cassette_sdram_addr;
 wire tape_start;
 wire tape_stop;
+wire tape_write;
+wire tape_out;
 wire [31:0] tape_bit_period =
   tape_motor && fast_tape_loading ? 32'd10417 : 32'd166667;
 
@@ -316,21 +342,116 @@ wire [31:0] tape_bit_period =
 // the edge-triggered external SDRAM handshake and byte-lane hazards.
 assign ioctl_wait = 1'b0;
 
-// Latch how many bytes the tape image holds, so the player knows where the
-// tape ends instead of wrapping through stale buffer data. Reset the
-// position whenever a new image is mounted.
-reg [24:0] tape_size;
-reg        tape_rewind;
-wire [7:0] tape_buffer_data;
+// The native .bmt image is the same decoded byte stream used by playback.
+// Recording overwrites it from byte zero after "New tape recording" and then
+// appends across motor stops, matching bm2's overwrite/append lifecycle.
+reg  [24:0] tape_size = 25'd0;
+reg         tape_rewind = 1'b0;
+reg         old_download = 1'b0;
+wire  [7:0] tape_buffer_data;
+wire        recorder_wr;
+wire [15:0] recorder_addr;
+wire  [7:0] recorder_data;
+wire [16:0] recorder_size;
+wire        recorder_dirty;
+wire        recorder_overflow;
+reg         recorder_saved = 1'b0;
+
+cassette_recorder recorder (
+  .clk_sys(clk_sys),
+  .reset(reset),
+  .clear(status[119]),
+  .saved(recorder_saved),
+  .cpu_tick(clk_cpu),
+  .motor(tape_motor),
+  .write_strobe(tape_write),
+  .buffer_wr(recorder_wr),
+  .buffer_addr(recorder_addr),
+  .buffer_data(recorder_data),
+  .size(recorder_size),
+  .dirty(recorder_dirty),
+  .overflow(recorder_overflow)
+);
+
 always @(posedge clk_sys) begin
-  reg old_download;
   old_download <= ioctl_download;
   tape_rewind <= 1'b0;
+  if (ioctl_download & ~old_download)
+    tape_size <= 25'd0;
   if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
     tape_size <= ioctl_addr + 25'd1;
   if (old_download & ~ioctl_download)
     tape_rewind <= 1'b1;
+  if (status[119]) begin
+    tape_size <= 25'd0;
+    tape_rewind <= 1'b1;
+  end
+  if (recorder_wr)
+    tape_size <= {8'd0, recorder_size};
 end
+
+// FS1 makes MiSTer mount a growable save sidecar as virtual disk 0. When the
+// motor stops, write all occupied 512-byte sectors. The final sector is padded
+// with mark bytes ($FF), which are harmless KCS leader in the raw stream.
+reg        save_mounted = 1'b0;
+reg  [2:0] flush_state = 3'd0;
+reg  [6:0] flush_lba = 7'd0;
+reg  [6:0] flush_last_lba = 7'd0;
+reg        tape_motor_d = 1'b0;
+localparam FLUSH_IDLE = 3'd0, FLUSH_REQ = 3'd1, FLUSH_DROP = 3'd2;
+
+wire [15:0] save_ram_addr = {flush_lba, sd_buff_addr[8:0]};
+wire [16:0] save_byte_offset = {1'b0, save_ram_addr};
+wire [16:0] tape_last_byte = tape_size[16:0] - 17'd1;
+assign sd_lba[0] = {25'd0, flush_lba};
+assign sd_buff_din[0] = (save_byte_offset < tape_size[16:0])
+                       ? tape_buffer_data : 8'hff;
+
+always @(posedge clk_sys) begin
+  tape_motor_d <= tape_motor;
+  recorder_saved <= 1'b0;
+  if (img_mounted)
+    save_mounted <= ~img_readonly;
+
+  if (reset) begin
+    sd_wr <= 1'b0;
+    flush_state <= FLUSH_IDLE;
+  end
+  else begin
+    case (flush_state)
+      FLUSH_IDLE: begin
+        sd_wr <= 1'b0;
+        if (tape_motor_d & ~tape_motor & recorder_dirty & save_mounted
+            & (tape_size != 25'd0)) begin
+          flush_lba <= 7'd0;
+          flush_last_lba <= tape_last_byte[15:9];
+          flush_state <= FLUSH_REQ;
+        end
+      end
+      FLUSH_REQ: begin
+        sd_wr <= 1'b1;
+        if (sd_ack) begin
+          sd_wr <= 1'b0;
+          flush_state <= FLUSH_DROP;
+        end
+      end
+      FLUSH_DROP: begin
+        if (!sd_ack) begin
+          if (flush_lba == flush_last_lba) begin
+            recorder_saved <= 1'b1;
+            flush_state <= FLUSH_IDLE;
+          end
+          else begin
+            flush_lba <= flush_lba + 7'd1;
+            flush_state <= FLUSH_REQ;
+          end
+        end
+      end
+      default: flush_state <= FLUSH_IDLE;
+    endcase
+  end
+end
+
 
 sdram sdram_inst(
   .init(sdram_init),
@@ -354,14 +475,20 @@ sdram sdram_inst(
   .SDRAM_nWE(SDRAM_nWE)
 );
 
-wire [15:0] tape_buffer_addr = cassette_sdram_addr[15:0];
+wire flushing = (flush_state != FLUSH_IDLE);
+wire [15:0] tape_buffer_addr = flushing ? save_ram_addr
+                                       : cassette_sdram_addr[15:0];
+wire [15:0] tape_buffer_write_addr = recorder_wr ? recorder_addr
+                                             : ioctl_addr[15:0];
+wire  [7:0] tape_buffer_write_data = recorder_wr ? recorder_data
+                                             : ioctl_dout;
 
 ram tape_buffer(
   .clk(clk_sys),
-  .addr(ioctl_addr[15:0]),
-  .din(ioctl_dout),
+  .addr(tape_buffer_write_addr),
+  .din(tape_buffer_write_data),
   .dout(),
-  .wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+  .wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
   .ce(1'b1),
   .addr_b(tape_buffer_addr),
   .dout_b(tape_buffer_data)
@@ -411,6 +538,8 @@ core core(
   .tape_bit(adc_cassette_bit),
   .tape_start(tape_start),
   .tape_stop(tape_stop),
+  .tape_write(tape_write),
+  .tape_out(tape_out),
   .dac_level(dac_level)
 );
 

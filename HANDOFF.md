@@ -1,6 +1,6 @@
-# Handoff — timing-clean border/video-mixer build
+# Handoff — timing-clean tape loading and saving build
 
-Date: 2026-07-27. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
+Date: 2026-07-28. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
 
 ## Current result
 
@@ -14,9 +14,16 @@ The core now works on physical MiSTer hardware:
 - `G 1000 <Space>` started MAZY and reached its `PUSH SPACE KEY` screen.
 - **Fast tape loading** is On by default and completes MAZY in about 15 seconds;
   the user confirmed the 16x hardware load works perfectly. Off retains 300-baud timing.
+- Tape saving is complete: BASIC's real `$EE80.0` KCS waveform is decoded into
+  the native `.bmt` byte stream and flushed to MiSTer's generic `FS` sidecar when
+  the cassette motor stops. The physical `record-test.sav` image contains four
+  checksum-valid blocks and intentional `$FF` padding to its 512-byte boundary.
 
 The installed test MGL is `/media/fat/.LASTLAUNCH.mgl`; its tape is
 `/media/fat/games/BasicMasterJr/mazy.s.bin`.
+The current RBF is `/media/fat/BasicMasterJr.rbf`; the preceding release is backed
+up as `/media/fat/BasicMasterJr.pre-tape-save-20260728.rbf.bak`. The recording test
+MGL is `/media/fat/BasicMasterJr-record-test.mgl` and mounts `record-test.bmt`.
 
 ## Current development build
 
@@ -25,6 +32,10 @@ The 2026-07-27 build adds three completed roadmap items:
 - Extended `JMP` (`$7E`) now takes exactly three 6800 clocks. The padded CPU suite reports all 200 measurable legal opcodes exact.
 - `$E891` now colors a 32-pixel horizontal and 24-line vertical MP-1710 border around the unchanged 256x192 machine image, producing 320x240 active video. Screen reverse selects the opposite color nibble, matching bm2.
 - Video now passes through MiSTer `video_mixer`, with forced scandoubling, HQ2x, CRT 25%/50%/75% scanlines, and gamma support. A 25 MHz video master provides four clocks per 6.25 MHz input pixel.
+
+The 2026-07-28 build adds `$EE80.0` tape output capture, CPU-state KCS decoding,
+64 KiB overwrite/append recording, the `.bmt` native extension, and generic MiSTer
+`FS1` save-sidecar writes on motor stop.
 
 The border/video-mixer build was exercised on the MiSTer at `192.168.1.198`:
 HDMI locked at 320x240 and `POKE 59537,7` changed the border to white. The
@@ -99,11 +110,11 @@ Build command:
 ~/intelFPGA_lite/quartus/bin/quartus_sh --flow compile BasicMasterJr
 ```
 
-The glyph-fixed border/mixer build completes with 0 errors and 53 warnings.
-TimeQuest passes with +0.218 ns worst setup slack and +0.249 ns worst hold slack. The system and
+The tape-saving build completes with 0 errors and 53 warnings.
+TimeQuest passes with +0.571 ns worst setup slack and +0.247 ns worst hold slack. The system and
 video PLL outputs are declared asynchronous, matching the explicit two-flop
 synchronizers and true dual-clock framebuffer at their boundaries. The RBF SHA-256
-is `cee0eb4b1a7d10b6be1fcd1c325e60a7850b513fc853a30ea2dfdaa46492a1e9`.
+is `a44e8de70d4bffc07f131e30636c27eabe2729634b7aaffcf5a163bfce06f8fb`.
 
 The remaining warnings are benign MiSTer/Quartus artifacts: inferred-ROM write
 pins, generated PLL nodes optimized away, deliberately idle SDRAM/ADC pins,
@@ -143,6 +154,6 @@ goldens were refreshed because the asynchronous renderer phase changed; the
 differences were deterministic and confined to scanline zero. The screenshot
 suite, the 256-byte Fast Tape test and all 200 measurable padded CPU opcodes pass.
 
-Open functional work is tracked in `TODO.md`: tape saving, printer/expansion
-hardware, authentic mixed text/graphics composition, MP-9730 1200-baud tape,
-MP-1803 floppy research, and tape-format/tool cleanup.
+Open functional work is tracked in `TODO.md`: printer/expansion hardware,
+authentic mixed text/graphics composition, MP-9730 1200-baud tape, and MP-1803
+floppy research.

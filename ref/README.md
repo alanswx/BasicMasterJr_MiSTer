@@ -30,6 +30,23 @@ Schematic reading tips: the tape/audio analogue section is at the bottom-right o
 (`sips -c 900 1700 --cropOffset 2400 3050` isolates it); the `IC40` output latch and R-2R
 ladder are around `--cropOffset 1850 2550`.
 
+## Original I/O magazine articles
+
+Internet Archive has complete, searchable scans of the three 1982 issues most useful for
+the Jr. video implementation:
+
+| Issue | Relevant pages | What it establishes |
+|---|---|---|
+| [I/O 1982-03](https://archive.org/details/io-198203) | 198, 291-299 | Jr. overview, block diagrams, power supply, and expansion-interface documentation. |
+| [I/O 1982-04](https://archive.org/details/io-198204/page/n309/mode/1up) | 304-306 | Complete MP-1710 colour-adapter circuit and specifications. |
+| [I/O 1982-05](https://archive.org/details/io-198205/page/n340/mode/1up) | 337 onward | MP-1710 usage and the source of Hitachi's supplied colour-graphics utility. |
+
+The May utility is the best primary source for `$EFE0`. Its `SCREEN` command names display
+codes 2 and 4 as text/graphics **superimpose**, and its `PAGMOD` assembly table maps the five
+choices exactly to `$00`, `$C0`, `$40`, `$CC`, `$4C`. The ordinary user manual documents
+only `$00`, `$C0`, and `$CC`; the mixed modes were therefore real but not part of its basic
+graphics tutorial.
+
 ## `emulators/`
 
 | Path | What | Licence |
@@ -51,7 +68,9 @@ software list ships a single 23 MB `.wav`, which is why MAME's model is audio-ba
 
 * `basicmaster.fan-site.net` — linked from ver0's page as an I/O documentation source;
   the host was unreachable at time of writing. Worth another try.
-* The 1982 I/O magazine special 「ベーシックマスター活用研究」, cited as the original published
-  source for the Basic Master hardware/circuit analysis.
+* The 332-page 1982 I/O special 「ベーシックマスター活用研究」. The
+  [National Diet Library record](https://ndlsearch.ndl.go.jp/books/R100000002-I000001618378)
+  has a digitized copy, but it requires the library's registered-user individual
+  transmission service. The March-May monthly articles above are publicly readable.
 * `s-sasaji.ddo.jp/bml3mk5/` — Basic Master Level 3 emulator; different machine, but the
   author publishes hardware notes that may cover shared subsystems.
