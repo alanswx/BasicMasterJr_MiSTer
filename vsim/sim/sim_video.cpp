@@ -427,20 +427,11 @@ void SimVideo::Clock(bool hblank, bool vblank, bool hsync, bool vsync, uint32_t 
 	bool vb_falling = (!vblank && last_vblank);
 	bool vb_rising = (vblank && !last_vblank);
 
-	if (!vblank) {
-		// Next line on end of hblank
-		if (hb_falling) {
-			// Increment line and reset pixel count
-			count_line++;
-			count_pixel = 0;
-		}
-		if (de) {
-			count_pixel++;
-		}
-	}
-
 	//frame_ready = 1;
-	// Reset on vblank falling edge (start of visible frame at vcount=0)
+	// Reset on vblank falling edge (start of visible frame at vcount=0). This has
+	// to come before the line increment: when hblank and vblank end on the same
+	// clock, the increment below then makes picture line 0 row 0. Done the other
+	// way round, line 0 was drawn at row -1 (clamped to 0) and line 1 overwrote it.
 	if (vb_falling) {
 		count_frame++;
 		count_line = 0;
@@ -456,6 +447,18 @@ void SimVideo::Clock(bool hblank, bool vblank, bool hsync, bool vsync, uint32_t 
 		stats_frameTime = time_ms - old_time;
 		old_time = time_ms;
 		stats_fps = (float)(1000.0 / stats_frameTime);
+	}
+
+	if (!vblank) {
+		// Next line on end of hblank
+		if (hb_falling) {
+			// Increment line and reset pixel count
+			count_line++;
+			count_pixel = 0;
+		}
+		if (de) {
+			count_pixel++;
+		}
 	}
 
 	// Only draw outside of blanks

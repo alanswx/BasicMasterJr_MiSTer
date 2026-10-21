@@ -58,6 +58,10 @@ localparam V_SYNC   = BORDER ? 3   : 34;
 localparam X_OFF    = BORDER ? 32  : 0;
 localparam Y_OFF    = BORDER ? 24  : 0;
 
+// Scan-side sync and blanking. The registered outputs hs/vs/hb/vb trail these
+// by one pixel, the same pixel of latency red/green/blue have.
+reg hs_i = 1'b1, vs_i = 1'b1, hb_i, vb_i;
+
 initial begin
   hs = 1'b1;
   vs = 1'b1;
@@ -124,7 +128,6 @@ wire [8:0] picture_y = vcount - (BORDER ? 9'd24 : 9'd0);
 wire [15:0] scan_addr = in_picture
                         ? {picture_y[7:0], picture_x[7:0]} : 16'd0;
 wire [2:0] vram_data;
-reg [2:0] scan_data;
 
 video_framebuffer framebuffer(
   .wr_clk(clk_sys),
@@ -199,37 +202,40 @@ always @(posedge clk_vid) begin
   frame <= 1'b0;
   ce_pix <= ~ce_pix;
 
-  if (~ce_pix) begin
+  if (ce_pix) begin
 
-    // Register once more to preserve the original one-pixel scan pipeline.
-    scan_data <= vram_data;
-
-  end
-
-  else begin
-
-    if (~(hb|vb)) begin
-      red <= (in_picture ? scan_data[2] : border_color_vid[2]) ? 8'hff : 8'd0;
-      green <= (in_picture ? scan_data[1] : border_color_vid[1]) ? 8'hff : 8'd0;
-      blue <= (in_picture ? scan_data[0] : border_color_vid[0]) ? 8'hff : 8'd0;
+    // The framebuffer has read scan_addr for the current hcount by now in both
+    // BORDER modes (one clk_vid edge after the hcount update without it, three
+    // with it). Sampling it on the ~ce_pix step instead caught the previous
+    // pixel when BORDER=0, and its border test then disagreed with the data.
+    // RGB written here is shown during the next pixel, so the sync and blank
+    // outputs are delayed by one step to match.
+    if (~(hb_i|vb_i)) begin
+      red <= (in_picture ? vram_data[2] : border_color_vid[2]) ? 8'hff : 8'd0;
+      green <= (in_picture ? vram_data[1] : border_color_vid[1]) ? 8'hff : 8'd0;
+      blue <= (in_picture ? vram_data[0] : border_color_vid[0]) ? 8'hff : 8'd0;
     end
+    hs <= hs_i;
+    vs <= vs_i;
+    hb <= hb_i;
+    vb <= vb_i;
 
     hcount <= hcount + 9'd1;
     case (hcount)
-      ACTIVE_W-1: hb <= 1'b1;
-      ACTIVE_W+H_FP-1: hs <= 1'b0;
-      ACTIVE_W+H_FP+H_SYNC-1: hs <= 1'b1;
+      ACTIVE_W-1: hb_i <= 1'b1;
+      ACTIVE_W+H_FP-1: hs_i <= 1'b0;
+      ACTIVE_W+H_FP+H_SYNC-1: hs_i <= 1'b1;
       H_TOTAL-1: begin
         vcount <= vcount + 9'd1;
         hcount <= 9'b0;
-        hb <= 1'b0;
+        hb_i <= 1'b0;
         case (vcount)
-          ACTIVE_H-1: vb <= 1'b1;
-          ACTIVE_H+V_FP-1: vs <= 1'b0;
-          ACTIVE_H+V_FP+V_SYNC-1: vs <= 1'b1;
+          ACTIVE_H-1: vb_i <= 1'b1;
+          ACTIVE_H+V_FP-1: vs_i <= 1'b0;
+          ACTIVE_H+V_FP+V_SYNC-1: vs_i <= 1'b1;
           V_TOTAL-1: begin
             vcount <= 9'd0;
-            vb <= 1'b0;
+            vb_i <= 1'b0;
             frame <= 1'b1;
             mix_phase <= ~mix_phase;
             // ~1 Hz attribute blink: flip every 30 frames.
