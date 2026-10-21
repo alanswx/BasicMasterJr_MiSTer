@@ -8,6 +8,25 @@ retro machines; the `bm/` (ベーシックマスター / Basic Master) builds ar
 here. Basic Master Level 2 software runs on the Jr. — the Jr. is the last L2-series
 model and is documented as L1/L2/L2II software compatible.
 
+`typein/` — magazine type-in programs. Graphic OPA and WILWESP come from the Typing
+Task Force. The rest were transcribed from マイコンBASICマガジン scans on archive.org
+(see `found2/`) and turned into tapes with `vsim/csp/typein.py`:
+
+| file | title | issue | load | notes |
+|---|---|---|---|---|
+| `graphic_helmet.bin` | グラフィック・ヘルメット | 1982-12 | `CALL $E37E`, `LOAD HELMET`, `RUN`, `S` | graphics page; one printed misprint fixed |
+| `gorilla.bin` | ゴリラと探検隊 | 1984-01 | `LOAD GORILA`, `RUN`, `S` | river-crossing puzzle, colour |
+| `missilefight_full.bin` | MISSILE FIGHT | 1984-06 | `MON`, `L MISSML` Space, `E`, `LOAD MISSIL`, `RUN` | BASIC + 1,264 bytes of machine code (monitor block first) |
+| `winecellar.bin` | WINE CELLAR | 1984-10 | `CALL $E37E`, `LOAD WINE`, `RUN`, `Y` | colour |
+| `drinkcan.bin` | DRINK CAN | 1985-03 | `LOAD DRINKC`, `RUN`, `S` | colour |
+| `tkurokawa.bin` | T.KUROKAWA | 1990-12 | `LOAD KUROKA`, `RUN`, any key | colour; カナ記号 up, カナ down |
+
+Each has a `.bas` transcription (UTF-8, half-width kana) and a `.md` with the source
+pages, controls, every change from the printed listing and what was verified. These
+are ASCII (`.S`) BASIC tapes, the format BASIC's own `SAVE` writes, so they load with
+`LOAD` and take a while at 300 baud (fast tape loading helps). The games poll the
+keyboard slowly; hold keys down rather than tapping them.
+
 `bmtape_info.py` — decodes and checksum-verifies a tape image. Also a download
 integrity check; it exits non-zero if anything fails.
 
