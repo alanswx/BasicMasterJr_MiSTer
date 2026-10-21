@@ -113,8 +113,11 @@ Worth confirming from the schematic's video section before implementing.
 Also different: MAME gates *display* on `color_mode & 1` and writes colour RAM unconditionally;
 bm2 gates colour-RAM *writes* on `$E892` bit 0 (`wtenbl`) and switches the display on once
 `$E892` has been written at all. bm2's reading matches the register's Japanese name
-(色情報書き込み許可 = "colour info write enable"), so prefer bm2. **The core currently follows
-MAME here and additionally has a bug: it latches colour RAM on reads of `$0100-$03FF` too.**
+(色情報書き込み許可 = "colour info write enable"), so prefer bm2. The core follows bm2 here
+(`rtl/core.v` `vram_write`), and the CSP `bmjr` VM in `~/dev2/common_source_code` was patched to
+match (its colour mismatch was mostly an unrelated off-by-$100 in its colour-table lookup);
+the 22 inufuto titles then render pixel-identically in both. Those titles write `$E892`
+once, before any colour, so they do not tell the two readings apart.
 
 ---
 

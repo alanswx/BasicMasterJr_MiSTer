@@ -23,30 +23,31 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 1. [x] Fix extended `JMP` (`$7E`) timing. It now completes in the 6800's three clocks; the complete padded CPU suite has no measurable fast or slow legal opcodes.
 2. [x] Render the MP-1710 `$E891` background color as bm2's 32x24 border around the native 256x192 image.
 3. [x] Revalidate and optimize simulation performance after the dual-port framebuffer work. The simulator now uses a timing-equivalent 25 MHz timebase and runs about 1.8x faster.
-4. [ ] Implement tape saving: `$EE80` bit 0, recording, and MiSTer upload/retrieval.
-5. [x] Integrate MiSTer `video_mixer`: forced scandoubling, HQ2x, CRT scanlines, and gamma.
-6. [ ] Implement printer compatibility and output capture, then the `$E800-$E803`
-       expansion PIA; settle the `$E800-$EDFF` mapping while doing this. Capture
-       the original printer byte stream as a MiSTer-downloadable `.prn` file;
-       there is no generic MiSTer printer/PDF service.
-7. [ ] Research real hardware and implement authentic mixed text+graphics composition.
-8. [ ] Add authentic MP-9730 1200-baud cassette support, including its P-ROM
-       and distinct tape block format, using `bmtape2` as the format reference.
-       This is compatibility work, not a replacement for Fast Tape Loading:
-       Fast Tape transparently accelerates the existing 300-baud machine,
-       whereas MP-9730 runs the CPU normally and implements the real 1200-baud
-       protocol.
-9. [ ] Research the MP-1803 floppy adapter before implementation. Locate and
-       preserve its technical documentation/ROM, the MP-3370 disk geometry, and
-       at least one known-good Jr. disk image (ideally MA-5380 Disk BASIC).
-       No verified public Jr./MP-1803 image corpus is currently known; Level 3
-       disk archives are not evidence of Jr. compatibility.
-10. [ ] Standardize the decoded Basic Master tape byte stream as the core's
-        native image format and retire `wav2cas.py` in favor of `bmtape2`.
-        Document a clear extension/name for it. Keep WAV as the archival audio
-        master and convert it off-core; do not add FPGA WAV parsing/demodulation.
-        If one-step WAV loading is desired later, investigate automatic
-        HPS-side conversion instead.
+4. [x] Integrate MiSTer `video_mixer`: forced scandoubling, HQ2x, CRT scanlines, and gamma.
+5. [ ] Research real hardware and implement authentic mixed text+graphics composition.
+6. [ ] Add authentic MP-9730 1200-baud cassette support, including its P-ROM
+   and distinct tape block format, using `bmtape2` as the format reference.
+   This is compatibility work, not a replacement for Fast Tape Loading:
+   Fast Tape transparently accelerates the existing 300-baud machine,
+   whereas MP-9730 runs the CPU normally and implements the real 1200-baud
+   protocol.
+7. [ ] Research the MP-1803 floppy adapter before implementation. Locate and
+   preserve its technical documentation/ROM, the MP-3370 disk geometry, and
+   at least one known-good Jr. disk image (ideally MA-5380 Disk BASIC).
+   No verified public Jr./MP-1803 image corpus is currently known; Level 3
+   disk archives are not evidence of Jr. compatibility.
+8. [ ] Standardize the decoded Basic Master tape byte stream as the core's
+   native image format and retire `wav2cas.py` in favor of `bmtape2`.
+   Document a clear extension/name for it. Keep WAV as the archival audio
+   master and convert it off-core; do not add FPGA WAV parsing/demodulation.
+   If one-step WAV loading is desired later, investigate automatic
+   HPS-side conversion instead.
+9. [ ] Implement tape saving: `$EE80` bit 0, recording, and MiSTer upload/retrieval.
+10. [ ] Implement printer compatibility and output capture, then the `$E800-$E803`
+    expansion PIA; settle the `$E800-$EDFF` mapping while doing this. Feed the
+    printer byte stream to the MiSTer printer server in
+    `~/dev2/printeremulation` (its parallel transport drains an FPGA FIFO over
+    `UIO_PRINTER_GET`; it renders PDFs to `/media/fat/printers/`).
 
 ---
 
@@ -79,14 +80,6 @@ fixed along the way:
 
 ## Unimplemented or incomplete hardware features
 
-- [ ] **Tape saving/output.** `$EE80` bit 0 is documented but ignored; there is no
-      upload path that writes a saved tape image back to MiSTer.
-- [ ] **Printer output and expansion PIA.** The printer ROM is now readable, but
-      `$E800-$E803` printer/PIA behavior and actual output are not implemented.
-      On MiSTer the useful result is software compatibility plus a captured raw
-      `.prn` file retrieved through the core-to-HPS upload path. MiSTer has no
-      generic printer spooler or PDF renderer; conversion or physical printing
-      belongs on the host. A UART output option could follow, but is secondary.
 - [ ] **MP-9730 1200-baud cassette.** This is an authentic optional device with
       its own P-ROM and a tape layout different from the standard 300-baud
       checksum-block format. It differs from default-on 16x Fast Tape Loading,
@@ -103,6 +96,13 @@ fixed along the way:
 - [ ] **Authentic mixed text+graphics composition.** `$40-$4F` is supported using
       bm2's alternating-frame approximation; the real hardware overlay/interlace
       behavior remains unresolved.
+- [ ] **Tape saving/output.** `$EE80` bit 0 is documented but ignored; there is no
+      upload path that writes a saved tape image back to MiSTer.
+- [ ] **Printer output and expansion PIA.** The printer ROM is now readable, but
+      `$E800-$E803` printer/PIA behavior and actual output are not implemented.
+      Output goes to the MiSTer printer server (`~/dev2/printeremulation`),
+      which accepts a parallel FIFO via `UIO_PRINTER_GET` or the HPS UART and
+      renders PDFs; it would need a model for the Jr.'s printer.
 
 ## P4 — smaller / structural
 

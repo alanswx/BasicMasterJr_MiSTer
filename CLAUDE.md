@@ -132,6 +132,13 @@ the real 300-baud rate (`.bit_period` = 166667). That only works because
 `rtl/m6800_pad.v` makes the CPU keep 6800 time — see below. If tapes stop loading,
 check CPU timing first.
 
+### Reference emulator
+
+`vsim/csp/README.md`: the Common Source Code Project's `bmjr` VM in `~/dev2/common_source_code`
+has a headless CLI (`--tape`, `--type`, `--screenshot`, `--poke`/`--dump-mem` in vsim syntax, CPU and
+I/O traces) and runs ~300x faster than vsim. Use it to see what software should do; it follows MAME
+on the disputed hardware points, so it doesn't settle them.
+
 ## CPU cycle accuracy
 
 `rtl/m6801.sv` is a 6801 core; the machine has a 6800, which is slower per opcode.
