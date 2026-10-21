@@ -58,11 +58,16 @@ ref/emulators/bmtape2/bmtape2/bmtape2
 ref/docs/
 
 # Tape images. Third-party software with unverified redistribution rights (the
-# inufuto games state no licence; the type-ins are magazine listings).
-# software/README.md documents exactly where to download them and how to
-# convert them, and software/bmtape_info.py verifies what you get.
+# inufuto games state no licence). software/README.md documents exactly where to
+# download them and how to convert them, and software/bmtape_info.py verifies
+# what you get. The magazine type-ins in software/typein/ are tracked: they were
+# published as listings for readers to type in.
 software/inufuto/
-software/typein/
+
+# Magazine page scans. Each type-in's .md names the archive.org item and leaves
+# to fetch them again.
+software/found2/micombasic_archive_org/*/
+software/found2/typingtaskforce_gamingalexandria/*Page Scans*
 
 # Python bytecode
 __pycache__/
