@@ -116,7 +116,10 @@ module dpram (
 		altsyncram_component.operation_mode = "BIDIR_DUAL_PORT",
 		altsyncram_component.outdata_aclr_a = "NONE",
 		altsyncram_component.outdata_aclr_b = "NONE",
-		altsyncram_component.outdata_reg_a = "CLOCK0",
+		// Port A (CPU) output unregistered: one-clock reads, so the CPU enable can
+		// run two clk_sys ticks apart (32x tape turbo, rtl/tape_speed.v). Port B
+		// (video, tape) keeps its output register: two-clock reads.
+		altsyncram_component.outdata_reg_a = "UNREGISTERED",
 		altsyncram_component.outdata_reg_b = "CLOCK0",
 		altsyncram_component.power_up_uninitialized = "FALSE",
 		altsyncram_component.read_during_write_mode_mixed_ports = "DONT_CARE",

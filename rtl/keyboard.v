@@ -3,6 +3,7 @@ module keyboard(
   input reset,
   input clk_sys,
   input [10:0] ps2_key,
+  input swap_alt_win,     // OSD Swap Alt/Win keys: Win types the machine's Kana Shift, Alt nothing
   input [3:0] kb_col,
   output reg [3:0] kb_key,
   output reg [3:0] kb_mod,
@@ -14,6 +15,14 @@ module keyboard(
 //   [0] Normal (leaves kana mode)  [1] Shift  [2] Kana Shift  [3] Kana
 
 reg [3:0] keys[15:0];
+
+// Alt (11, or E0 11 on the right) is the machine's Kana Shift. With the swap,
+// the Win keys (E0 1F, E0 27) take that job and Alt maps to nothing.
+wire win_key = ps2_key[8] && (ps2_key[7:0] == 8'h1f || ps2_key[7:0] == 8'h27);
+wire [7:0] code = !swap_alt_win        ? ps2_key[7:0]
+                : win_key              ? 8'h11
+                : ps2_key[7:0] == 8'h11 ? 8'h00
+                :                        ps2_key[7:0];
 
 always @(posedge clk_sys) begin
   reg toggle;
@@ -45,12 +54,12 @@ always @(posedge clk_sys) begin
   end
   else begin
 
-    case (ps2_key[7:0])
+    case (code)
 
       8'h12,
       8'h59: kb_mod[1] <= ~status;  // Shift
       8'h14: kb_mod[0] <= ~status;  // Left Ctrl  -> Normal
-      8'h11: kb_mod[2] <= ~status;  // Left Alt   -> Kana Shift
+      8'h11: kb_mod[2] <= ~status;  // Alt (or Win, swapped) -> Kana Shift
       8'h58: kb_mod[3] <= ~status;  // Caps Lock  -> Kana
 
       8'h76: break_key <= status;   // Esc -> BREAK

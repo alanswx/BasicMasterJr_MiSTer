@@ -48,8 +48,11 @@
 #define VGA_HEIGHT 192
 
 // sim.v deliberately uses a 25 MHz timebase to reduce Verilator work while
-// preserving the machine's real CPU/video/tape rates.
+// preserving the machine's real CPU/video/tape rates. `make SIM_HZ=50000000`
+// builds the hardware's 50 MHz timebase (and its 32x tape turbo) instead.
+#ifndef SIM_CLK_HZ
 #define SIM_CLK_HZ 25000000u
+#endif
 
 // 40 us power-on reset. The core needs long enough for the $readmemh ROMs to
 // be visible and for the 6800 to fetch its reset vector.
@@ -78,6 +81,8 @@ bool trace_key          = false;
 unsigned int key_hold_cycles = SIM_CLK_HZ * 30 / 1000; // 30 ms
 unsigned int tape_bit_period = SIM_CLK_HZ / 300;       // 300 baud
 bool fast_tape = true;
+bool tape_overlay = true;
+std::vector<int> rewind_frames;
 int  stop_at_frame      = -1;
 std::vector<int> screenshot_frames;
 std::string tape_image;
@@ -372,11 +377,14 @@ static void tape_trace()
 	}
 	static uint8_t last_state = 0xFF;
 	static uint8_t last_motor = 0xFF;
-	if (top->dbg_tape_state != last_state || top->dbg_tape_motor != last_motor) {
+	static uint8_t last_turbo = 0xFF;
+	if (top->dbg_tape_state != last_state || top->dbg_tape_motor != last_motor ||
+	    top->dbg_tape_turbo != last_turbo) {
 		last_state = top->dbg_tape_state;
 		last_motor = top->dbg_tape_motor;
-		printf("[tape] motor=%d state=%d addr=%u bit=%d frame=%d\n",
-		       top->dbg_tape_motor, top->dbg_tape_state,
+		last_turbo = top->dbg_tape_turbo;
+		printf("[tape] motor=%d turbo=%d state=%d addr=%u bit=%d frame=%d\n",
+		       top->dbg_tape_motor, top->dbg_tape_turbo, top->dbg_tape_state,
 		       (unsigned)top->dbg_tape_addr, top->dbg_tape_bit, video.count_frame);
 	}
 }
@@ -476,6 +484,8 @@ static void RunBatch(int steps) { for (int i = 0; i < steps; i++) verilate(); }
 static bool frame_actions(int frame)
 {
 	if (!key_injections.empty()) process_key_injections(frame);
+	// OSD Rewind tape: hold the button for one frame.
+	top->tape_rewind_btn = std::find(rewind_frames.begin(), rewind_frames.end(), frame) != rewind_frames.end();
 
 	for (auto it = mem_pokes.begin(); it != mem_pokes.end(); ) {
 		if (it->frame == frame) { apply_poke(*it); it = mem_pokes.erase(it); }
@@ -527,7 +537,10 @@ static void usage(const char* argv0)
 	"  --key-hold MS              how long to hold each injected key (default 30 ms)\n"
 	"  --tape-baud N              tape bit rate (default 300)\n"
 	"  --tape-bit-period N        tape bit period in clk_sys ticks (overrides --tape-baud)\n"
-	"  --fast-tape on|off         16x motor-active loading (default on)\n"
+	"  --fast-tape on|off         OSD Tape speed: turbo while a tape loads (default on;\n"
+	"                             16x at the default 25 MHz build, 32x with SIM_HZ=50000000)\n"
+	"  --tape-overlay on|off      OSD Tape overlay: status bar while the tape plays (default on)\n"
+	"  --rewind-at N[,N,...]      press OSD Rewind tape at these frames\n"
 	"  -h, --help                 this text\n"
 	"\n"
 	"Run from the vsim/ directory: the ROM .mem files are opened relative to cwd.\n",
@@ -559,6 +572,22 @@ int main(int argc, char** argv, char** env)
 			if      (value == "on")  fast_tape = true;
 			else if (value == "off") fast_tape = false;
 			else { printf("--fast-tape wants on or off\n"); return 1; }
+		}
+		else if (a == "--tape-overlay") {
+			std::string value = next("--tape-overlay");
+			if      (value == "on")  tape_overlay = true;
+			else if (value == "off") tape_overlay = false;
+			else { printf("--tape-overlay wants on or off\n"); return 1; }
+		}
+		else if (a == "--rewind-at") {
+			std::string list = next("--rewind-at");
+			for (size_t pos = 0; pos <= list.size();) {
+				size_t comma = list.find(',', pos);
+				std::string tok = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+				if (!tok.empty()) rewind_frames.push_back(atoi(tok.c_str()));
+				if (comma == std::string::npos) break;
+				pos = comma + 1;
+			}
 		}
 		else if (a == "--tape")              tape_image = next("--tape");
 		else if (a == "--screenshot-name")   screenshot_name = next("--screenshot-name");
@@ -649,6 +678,8 @@ int main(int argc, char** argv, char** env)
 	input.keyEventWait = key_hold_cycles;
 	top->tape_bit_period = tape_bit_period;
 	top->fast_tape = fast_tape;
+	top->tape_overlay = tape_overlay;
+	top->tape_rewind_btn = 0;
 
 	if (!tape_image.empty()) {
 		printf("Loading tape image: %s\n", tape_image.c_str());
@@ -714,8 +745,8 @@ int main(int argc, char** argv, char** env)
 		            (top->dbg_bank & 1) ? "RAM" : "ROM",
 		            (top->dbg_bank & 2) ? "RAM" : "ROM",
 		            (top->dbg_bank & 4) ? "RAM" : "ROM");
-		ImGui::Text("tape motor=%d state=%d addr=%u/%u bit=%d",
-		            top->dbg_tape_motor, top->dbg_tape_state,
+		ImGui::Text("tape motor=%d turbo=%d state=%d addr=%u/%u bit=%d",
+		            top->dbg_tape_motor, top->dbg_tape_turbo, top->dbg_tape_state,
 		            (unsigned)top->dbg_tape_addr, (unsigned)top->dbg_tape_size,
 		            top->dbg_tape_bit);
 		ImGui::Checkbox("Run", &run_enable);

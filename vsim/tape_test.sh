@@ -5,7 +5,7 @@
 #   ./tape_test.sh                          first block of mazy (~2.5 min)
 #   ./tape_test.sh block <image> <name>     first block of any image
 #   ./tape_test.sh full  <image> <name>     whole image, then run it (~30 min)
-#   ./tape_test.sh fast  <image> <name>     first block at the default 16x rate
+#   ./tape_test.sh fast  <image> <name>     first block with the default turbo (16x at 25 MHz)
 #
 # The load address is read out of the tape image, not assumed: different titles
 # load to different places (MAZY at $1000, most of the rest at $2200), and

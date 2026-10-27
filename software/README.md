@@ -24,8 +24,21 @@ Task Force. The rest were transcribed from マイコンBASICマガジン scans o
 Each has a `.bas` transcription (UTF-8, half-width kana) and a `.md` with the source
 pages, controls, every change from the printed listing and what was verified. These
 are ASCII (`.S`) BASIC tapes, the format BASIC's own `SAVE` writes, so they load with
-`LOAD` and take a while at 300 baud (fast tape loading helps). The games poll the
+`LOAD` and take a while at 300 baud (Tape speed 32x, the default, loads them in well under a minute). The games poll the
 keyboard slowly; hold keys down rather than tapping them.
+
+`found/` and `found2/` — two web sweeps for more software (2026-10). `found/` mirrors
+zu2's BASICMASTER repo (Tiny Galaxy, Dendai Tiny BASIC, L2BASCOM, LIFE2, GAME68,
+KUMAJIRI, tools) and inufuto's UCHOTOS. `found2/README.md` surveys type-in sources and
+indexes every Basic Master program in ベーマガ 1982–1990 against archive.org scans.
+Loadable zu2 tapes (the `.cmt` files are the same byte stream as `.bin`):
+
+| file | load | notes |
+|---|---|---|
+| `found/zu2_BASICMASTER/TinyGalaxy/galaxy.bin.cmt` + `galaxy.bas.cmt` | `MON`, `L GALAXY` Space, `E`, then `LOAD GALAXY`, `RUN` | machine code + BASIC; concatenate the two into one tape. V/N move, 英数 accelerates |
+| `found/zu2_BASICMASTER/DendaiTinyBasic/DENDAI.cmt` | `MON`, `L DENDAI` Space, `G 1000` Space | Tiny BASIC; `PR.6*7` |
+| `found/zu2_BASICMASTER/life2/life2.cmt` | `MON`, `L LIFE2` Space, `G 3000` Space | clears the screen and waits for input (that is not a hang) |
+| `found/inufuto_uchotos/uchotos.s.bin` | `MON`, `L UCHOTO` Space, `G 2200` Space | |
 
 `bmtape_info.py` — decodes and checksum-verifies a tape image. Also a download
 integrity check; it exits non-zero if anything fails.
@@ -128,7 +141,7 @@ G 1000 <Space>        run from the entry address
 The Space-not-Return terminator is real — MAME's driver notes it too
 (`bmjr.cpp` header comment).
 
-In the simulator, once the tape path works:
+In the simulator:
 
 ```bash
 cd vsim/

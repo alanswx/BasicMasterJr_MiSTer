@@ -21,7 +21,9 @@ module emu (
 
 	// clk_sys ticks per tape bit; --tape-bit-period sweeps this from sim_main
 	input      [31:0] tape_bit_period,
-	input             fast_tape,
+	input             fast_tape,        // OSD Tape speed: Nx
+	input             tape_overlay,     // OSD Tape overlay: On
+	input             tape_rewind_btn,  // OSD Rewind tape (level; rising edge rewinds)
 
 	// HPS file transfer (tape images) -- driven by sim/sim_bus.cpp
 	input             ioctl_download,
@@ -58,6 +60,7 @@ module emu (
 	output            dbg_tape_stop,
 	output            dbg_tape_bit,
 	output            dbg_tape_motor,
+	output            dbg_tape_turbo,
 	output      [2:0] dbg_tape_state,
 	output     [24:0] dbg_tape_addr,
 	output     [24:0] dbg_tape_size,
@@ -71,11 +74,16 @@ module emu (
 );
 
 //////////////////////////////  CLOCKS  //////////////////////////////////////
-// The simulator uses a 25 MHz system timebase instead of the hardware's
-// 50 MHz. This halves the number of Verilator evaluations per emulated second
-// while leaving enough bandwidth for video.v's six-cycle-per-pixel renderer
-// (17.4 MHz minimum at 59 Hz). CPU, video, tape and watchdog rates are scaled
-// to preserve real-machine time.
+// The simulator uses a 25 MHz system timebase by default instead of the
+// hardware's 50 MHz. This halves the number of Verilator evaluations per
+// emulated second while leaving enough bandwidth for video.v's
+// six-cycle-per-pixel renderer (17.4 MHz minimum at 59 Hz). CPU, video, tape
+// and watchdog rates are scaled to preserve real-machine time.
+//
+// The one thing 25 MHz cannot do is the hardware's 32x tape turbo: a 24 MHz CPU
+// enable needs the clock at least twice as fast (rtl/tape_speed.v), so the
+// default build loads tapes at 16x. `make SIM_HZ=50000000` builds the
+// hardware's timebase and 32x turbo (about half the speed).
 //
 // 25 / 10.638297 is not an integer, so instead of a divider we run a phase
 // accumulator: clk_vid toggles when the accumulator wraps. Worst-case jitter
@@ -85,9 +93,15 @@ module emu (
 // One accumulator carry = one clk_vid EDGE, so the increment carries twice per
 // clk_vid cycle. Getting that factor of 2 wrong ran the whole video side (and
 // therefore every --screenshot / --send-keys frame number) at half speed.
-localparam integer SIM_CLK_HZ = 25_000_000;
-localparam [31:0] VID_INC = 32'd3_655_291_016;  // round(2 * 10.638297e6 / 25e6 * 2^32)
-                                                // -> 10.6383 MHz, 59.02 Hz frames
+`ifndef SIM_CLK_HZ
+`define SIM_CLK_HZ 25000000
+`endif
+localparam integer SIM_CLK_HZ = `SIM_CLK_HZ;
+// round(2 * 10.638297e6 / SIM_CLK_HZ * 2^32): 3,655,291,016 at 25 MHz
+// -> 10.6383 MHz, 59.02 Hz frames
+localparam [63:0] VID_INC64 = (64'd21_276_594 * 64'd4294967296 + SIM_CLK_HZ / 2) / SIM_CLK_HZ;
+localparam [31:0] VID_INC = VID_INC64[31:0];
+localparam integer TURBO_SHIFT = SIM_CLK_HZ >= 48_000_000 ? 5 : 4;
 
 reg [31:0] vid_acc = 32'd0;
 reg        clk_vid = 1'b0;
@@ -97,11 +111,26 @@ always @(posedge clk_sys) begin
 	if (vid_acc + VID_INC < vid_acc) clk_vid <= ~clk_vid;  // carry out => toggle
 end
 
-// CPU clock enable and default-on fast tape loading, matching BasicMasterJr.sv.
+// CPU clock enable and default-on tape turbo, matching BasicMasterJr.sv.
 wire tape_motor;
-wire [31:0] cpu_increment = tape_motor && fast_tape
-	? (32'd128_849_019 << 4)
-	: 32'd128_849_019;
+wire tape_end;
+wire tape_turbo;
+wire tape_active;
+wire [31:0] cpu_increment;
+wire [31:0] turbo_bit_period;
+
+tape_speed #(.CLK_HZ(SIM_CLK_HZ), .SHIFT(TURBO_SHIFT)) tape_speed (
+	.clk          (clk_sys),
+	.enable       (fast_tape),
+	.motor        (tape_motor),
+	.tape_left    (~tape_end),
+	.base_period  (tape_bit_period),
+	.turbo        (tape_turbo),
+	.active       (tape_active),
+	.cpu_increment(cpu_increment),
+	.bit_period   (turbo_bit_period)
+);
+
 reg [31:0] cpu_acc = 32'd0;
 wire [32:0] cpu_sum = {1'b0, cpu_acc} + {1'b0, cpu_increment};
 wire clk_cpu = cpu_sum[32];
@@ -146,24 +175,25 @@ wire        tape_stop;
 wire        break_key;
 wire  [4:0] dac_level;
 
-// Tape image size + rewind on mount, mirroring BasicMasterJr.sv.
-reg [24:0] tape_size;
+// Tape image size + rewind on mount or Rewind tape, mirroring BasicMasterJr.sv.
+reg [24:0] tape_size = 25'd0;
 reg        tape_rewind;
 always @(posedge clk_sys) begin
-	reg old_download;
+	reg old_download, old_rewind_btn;
 	old_download <= ioctl_download;
+	old_rewind_btn <= tape_rewind_btn;
 	tape_rewind <= 1'b0;
 	if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
 		tape_size <= ioctl_addr + 25'd1;
-	if (old_download & ~ioctl_download)
+	if (old_download & ~ioctl_download & (ioctl_index == 8'd1))
+		tape_rewind <= 1'b1;
+	if (tape_rewind_btn & ~old_rewind_btn)
 		tape_rewind <= 1'b1;
 end
 
 cassette cassette (
 	.clk_sys     (clk_sys),
-	.bit_period  (tape_motor && fast_tape
-	              ? ((tape_bit_period + 32'd8) >> 4)
-	              : tape_bit_period),
+	.bit_period  (turbo_bit_period),
 	.reset       (reset),           // NOT core_reset: a tape mount must not rewind twice
 	.tape_start  (tape_start),
 	.tape_stop   (tape_stop),
@@ -177,6 +207,7 @@ cassette cassette (
 	.sdram_ready (1'b1),
 	.tape_bit    (tape_bit),
 	.motor       (tape_motor),
+	.tape_end    (tape_end),
 	.status      ()
 );
 
@@ -207,6 +238,7 @@ keyboard keyboard (
 	.reset  (reset),
 	.clk_sys(clk_sys),
 	.ps2_key(ps2_key),
+	.swap_alt_win(1'b0),   // OSD Swap Alt/Win keys; --send-keys can't type Win
 	.kb_col (kb_col),
 	.kb_key (kb_key),
 	.kb_mod (kb_mod),
@@ -214,13 +246,43 @@ keyboard keyboard (
 	.status (key_pressed)
 );
 
-//////////////////////////////  OUTPUTS  /////////////////////////////////////
+//////////////////////////////  TAPE OVERLAY  ////////////////////////////////
+wire [41:0] tape_status_word;
+wire        tape_status_req, tape_status_ack;
+wire [23:0] overlay_rgb;
+
+tape_status tape_status (
+	.clk     (clk_sys),
+	.loaded  (tape_size != 25'd0),
+	.playing (tape_active),
+	.fast    (tape_turbo),
+	.position(tape_addr),
+	.length  (tape_size),
+	.status  (tape_status_word),
+	.req     (tape_status_req),
+	.ack     (tape_status_ack)
+);
+
 // R/G are crossed on purpose -- see BasicMasterJr.sv. video.v emits
 // {R,G,B} = {bit2,bit1,bit0} of the pen; the machine's pen order is BRG
 // (R=bit1, G=bit2, B=bit0), and this swap turns one into the other.
-assign VGA_R    = green;
-assign VGA_G    = red;
-assign VGA_B    = blue;
+tape_overlay #(.FACTOR_BCD(TURBO_SHIFT == 5 ? 8'h32 : 8'h16)) overlay (
+	.clk    (clk_vid),
+	.ce_pix (ce_pix),
+	.hblank (hb),
+	.vblank (vb),
+	.enable (tape_overlay),
+	.status (tape_status_word),
+	.req    (tape_status_req),
+	.ack    (tape_status_ack),
+	.rgb_in ({green, red, blue}),
+	.rgb_out(overlay_rgb)
+);
+
+//////////////////////////////  OUTPUTS  /////////////////////////////////////
+assign VGA_R    = overlay_rgb[23:16];
+assign VGA_G    = overlay_rgb[15:8];
+assign VGA_B    = overlay_rgb[7:0];
 assign VGA_HS   = hs;
 assign VGA_VS   = vs;
 assign VGA_HB   = hb;
@@ -241,6 +303,7 @@ assign dbg_tape_start = tape_start;
 assign dbg_tape_stop  = tape_stop;
 assign dbg_tape_bit   = tape_bit;
 assign dbg_tape_motor = tape_motor;
+assign dbg_tape_turbo = tape_turbo;
 assign dbg_tape_state = cassette.state;
 assign dbg_tape_addr  = cassette.sdram_addr;
 assign dbg_tape_size  = tape_size;

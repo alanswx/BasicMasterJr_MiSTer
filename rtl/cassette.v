@@ -44,6 +44,7 @@ module cassette (
 
   output            tape_bit,     // -> $EE80 bit 7
   output reg        motor,
+  output            tape_end,     // no tape, or every byte has been played
   output      [2:0] status
 );
 
@@ -66,6 +67,7 @@ module cassette (
   assign status   = state;
 
   wire at_end = (image_size == 25'd0) || (sdram_addr >= image_size);
+  assign tape_end = at_end;
 
   // The frame bit currently on the wire: start low, 8 data LSB first, stops high.
   wire frame_bit = (bit_index == 4'd0) ? 1'b0

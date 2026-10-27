@@ -7,16 +7,54 @@ behaviour is, and where the evidence lives. Background:
 
 **Status:** BASIC and the monitor boot and take keyboard input. **Tape loading works
 end to end** — `MAZY` loads from a real tape image, all 5,560 bytes byte-exact, and
-runs. Sound, interrupts, the `$EFE0` graphics modes and blink attributes are
-implemented. Remaining work is listed below.
+runs. All 22 inufuto titles load byte-exact and match the CSP reference emulator
+pixel for pixel on their title screens. Sound, interrupts, the `$EFE0` graphics modes,
+blink attributes, the MP-1710 border and `video_mixer` are implemented. Remaining work
+is listed below; `HANDOFF.md` has the current state.
 
 Verify with:
 ```bash
-cd vsim/ && ./regression.sh          # screenshots + tape load checks, ~2 min
-cd vsim/ && ./regression.sh --no-tape # screenshots only, ~1 min
+cd vsim/ && ./regression.sh          # screenshots + tape load checks (7 tests)
+cd vsim/ && ./regression.sh --no-tape # screenshots only
 cd vsim/ && ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY  # + run it, ~15 min
 cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 ```
+
+## Next up (small, from the 2026-10 session)
+
+- [ ] **Hardware-test the tester RBF** (`~/dev2/BasicMasterJr_tester_20261021`, built
+      from `1b100f6`). It is the first hardware build with the video RGB/blanking fix.
+      Check that no column is lost at the picture edges and that the border is right.
+- [ ] Run MISSILE FIGHT (`software/typein/missilefight_full.bin`) on the core. So far
+      it has only run in CSP.
+- [ ] Re-run Gorilla on the core with a longer key hold (`--key-hold 1500` or so). At
+      120 ms it reached the title screen only, because its INKEY$ poll is about 1.5 s.
+- [ ] Decide with the user how to commit the CSP-side bmjr fixes in
+      `~/dev2/common_source_code` (see `vsim/csp/README.md`).
+- [x] **Tape speed 32x, the tape overlay and Rewind tape** (2026-10-25) tested on
+      mister14: MAZY loads in ~11 s and runs, Gorilla (BASIC) loads in ~20 s and
+      runs in colour, the overlay sits in the bottom border, Rewind tape reloads
+      from block 01. The first build crashed at 32x: CPU RAM port A had a
+      registered output (two-clock reads) while the sim modelled one clock. Port A
+      is now unregistered and the sim model matches both ports.
+- [x] "Tape ready (rewound)" shows on hardware when the tape is mounted from the
+      OSD file browser. After an MGL mount, Main's video-mode popup covers it.
+- [ ] Run `vsim/csp/compare_tapes.py` over all 22 titles with a `make
+      SIM_HZ=50000000` build (32x). Not done yet: the CSP build in the scratchpad
+      had been cleaned away.
+- [x] OSD and tape standards (2026-10-26), adopted where they make sense: `Tape`
+      row name, rows in standard order, one `Reset`, `Swap Alt/Win keys` (tested on
+      mister14: Win types カナ記号 when swapped), Tape speed latched when the motor
+      starts. Deliberately skipped: submenu pages and Apply and reset / Changes pending
+      (few rows, no setting changes the running machine), Load ROM (ROMs are built
+      in), Tape audio, quick start (no autoboot path). Deliberate deviations: turbo
+      (250 ms) and the overlay (1.5 s) stay on after the motor stops, because BASIC
+      stops it after every block.
+- [ ] Optional auto-type (like SharpMZ's `rtl/tape_autotype.sv`): from the tape
+      header, type `MON` / `L NAME` Space / `G addr` Space for `.B` files, or
+      `LOAD NAME` / `RUN` for `.S`. The tape format holds no start address; the first
+      block's address is right for all 22 inufuto titles. Worth it if testers keep
+      typing Return instead of Space.
 
 ## Implementation order
 
@@ -27,8 +65,8 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
 5. [ ] Research real hardware and implement authentic mixed text+graphics composition.
 6. [ ] Add authentic MP-9730 1200-baud cassette support, including its P-ROM
    and distinct tape block format, using `bmtape2` as the format reference.
-   This is compatibility work, not a replacement for Fast Tape Loading:
-   Fast Tape transparently accelerates the existing 300-baud machine,
+   This is compatibility work, not a replacement for Tape speed 32x:
+   turbo transparently accelerates the existing 300-baud machine,
    whereas MP-9730 runs the CPU normally and implements the real 1200-baud
    protocol.
 7. [ ] Research the MP-1803 floppy adapter before implementation. Locate and
@@ -57,8 +95,10 @@ P0 build/correctness (`sdram_wtbt` double drive, `$EFD0` read/write inversion,
 colour RAM written on reads, 1-bit attribute latch), the whole P1 cassette list,
 the 750 kHz CPU clock, IRQ/NMI, the 5-bit DAC, `$EFE0` mode decode, blink
 attributes and `$E891`, the visible MP-1710 border, the keyboard rewrite,
-default-on 16x fast tape loading, cycle-correct extended `JMP`, and MiSTer
-`video_mixer` support, and the timing-equivalent 25 MHz Verilator timebase.
+default-on tape turbo (now 32x, with the tape overlay and Rewind tape), cycle-correct extended `JMP`, and MiSTer
+`video_mixer` support, the timing-equivalent 25 MHz Verilator timebase, and RGB
+aligned with blanking (it lagged by 1 px on hardware and 2 px in vsim; vsim also
+dropped picture line 0).
 Three extra bugs were found and
 fixed along the way:
 
@@ -82,9 +122,9 @@ fixed along the way:
 
 - [ ] **MP-9730 1200-baud cassette.** This is an authentic optional device with
       its own P-ROM and a tape layout different from the standard 300-baud
-      checksum-block format. It differs from default-on 16x Fast Tape Loading,
+      checksum-block format. It differs from default-on 32x Tape speed,
       which speeds the CPU and 300-baud tape together while preserving their
-      emulated timing relationship. `bmtape2` is the format reference. Fast Tape
+      emulated timing relationship. `bmtape2` is the format reference. Turbo
       could also accelerate MP-9730 in wall-clock time after it is implemented.
 - [ ] **MP-1803 floppy adapter research.** The adapter connected the MP-3370
       3-inch compact floppy drive, and MA-5380 Disk BASIC existed, but no

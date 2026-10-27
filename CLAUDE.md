@@ -63,7 +63,8 @@ debugging much cheaper:
 * `--poke 2100=FFx32@600` — write RAM directly (`FFx32` repeats), so a test can set
   up state without depending on typing a BASIC line correctly.
 
-Speed is roughly **8 frames/second**, so a 500-frame scenario takes about a minute.
+Speed is roughly **8–18 frames/second** (the 25 MHz sim timebase helped), so a
+500-frame scenario takes 30–60 seconds.
 Screenshots are 256×192 PNGs of the active picture.
 
 ### Keyboard injection gotcha
@@ -83,7 +84,7 @@ cd vsim/
 ./regression.sh --bless      # accept current screenshots as the new golden
 
 ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY   # whole tape + run it (~30 min)
-./tape_test.sh fast ../software/inufuto/mazy.s.bin MAZY   # first block at default 16x
+./tape_test.sh fast ../software/inufuto/mazy.s.bin MAZY   # first block with turbo (16x in the 25 MHz build)
 ```
 
 The tape stage is functional, not visual: it loads a real image through the monitor
@@ -107,7 +108,10 @@ differences, all commented in the file:
   10.638 MHz, ~59 Hz frames, up to one `clk_sys` of jitter).
 * `vsim/rtl/dpram.v` shadows the Quartus dual-port RAM wrapper. **Do not add
   `-I../rtl` to the Verilator command**; it can bypass the explicit simulation
-  source list and select the synthesis wrapper.
+  source list and select the synthesis wrapper. **Its read latency must match the
+  altsyncram settings** (port A, the CPU: one clock; port B, video and tape: two).
+  When the sim gave port A one clock but the hardware gave two, 32x tape turbo
+  passed every sim test and crashed the FPGA. Change both files together.
 * Tape images use the same dedicated 64 KiB dual-port RAM in both tops.
   `ioctl_wait` is therefore tied low; external SDRAM is not part of playback.
 
@@ -125,19 +129,43 @@ Entry is `$2200` for everything except MAZY (`$1000`). Details and provenance in
 Loading works: `./tape_test.sh` checks a block byte-for-byte, `./tape_test.sh full`
 loads all of MAZY and runs it.
 
-Tape images must fit in the 64 KiB on-chip buffer. **Fast tape loading** defaults
-to On and multiplies both CPU and tape rates by 16 only while the cassette motor
-is active, preserving the ROM loader's 2500 CPU cycles per bit. Set it Off for
-the real 300-baud rate (`.bit_period` = 166667). That only works because
+Tape images must fit in the 64 KiB on-chip buffer. OSD **Tape speed** defaults to
+**32x** and multiplies both CPU and tape rates by 32 while the cassette motor runs
+(and for 250 ms after it stops, so BASIC's per-block motor stops stay fast),
+preserving the ROM loader's 2500 CPU cycles per bit (`rtl/tape_speed.v`). **Normal**
+is the real 300-baud rate (`.bit_period` = 166667). That only works because
 `rtl/m6800_pad.v` makes the CPU keep 6800 time — see below. If tapes stop loading,
-check CPU timing first.
+check CPU timing first. **Tape overlay** (`rtl/tape_overlay.sv`) draws
+`TAPE ▶ m:ss/ m:ss x32` and a progress bar while a tape plays; **Rewind tape**
+rewinds. These follow `~/dev2/tape-standard.md` (the Sharp X1 core is its reference).
+
+The default sim build runs a 25 MHz timebase, which can only do **16x** (a 24 MHz CPU
+enable needs a 50 MHz clock). `make SIM_HZ=50000000` builds the hardware's timebase
+and 32x, at about half the speed; switching rebuilds `obj_dir` from scratch. Sim
+flags: `--fast-tape on|off`, `--tape-overlay on|off`, `--rewind-at N`, and
+`--trace-tape` prints `turbo=`.
+
+Other test software: `software/typein/` (magazine BASIC type-ins, loaded with
+`LOAD NAME` / `RUN`; some need `CALL $E37E` first) and `software/found/` (zu2's
+programs; their `.cmt` files are the same byte stream). `software/README.md` lists
+load commands for each.
 
 ### Reference emulator
 
 `vsim/csp/README.md`: the Common Source Code Project's `bmjr` VM in `~/dev2/common_source_code`
 has a headless CLI (`--tape`, `--type`, `--screenshot`, `--poke`/`--dump-mem` in vsim syntax, CPU and
 I/O traces) and runs ~300x faster than vsim. Use it to see what software should do; it follows MAME
-on the disputed hardware points, so it doesn't settle them.
+on the disputed hardware points, so it doesn't settle them. `vsim/csp/compare_tapes.py` runs any set of
+tapes in both and diffs RAM and pixels; `vsim/csp/typein.py` turns a BASIC listing into a tape and test-runs it.
+CSP had its own colour bugs (fixed locally, see `vsim/csp/README.md`), so when the two disagree, find out which
+is wrong before changing the RTL.
+
+### Building the RBF
+
+There is no Quartus on the Mac. Build on `misterubuntu` (Quartus 17.0.2 Lite at
+`~/intelFPGA_lite/quartus/bin/quartus_sh`): copy the committed tree there with `git archive`
+and run `quartus_sh --flow compile BasicMasterJr` (~4.5 min). `HANDOFF.md` has the exact
+commands and the current build's SHA-256 and timing.
 
 ## CPU cycle accuracy
 

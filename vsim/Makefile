@@ -19,6 +19,13 @@ V_DEFINE = +define+SIMULATION=1 +incdir+$(RTL) \
 	--timescale-override 1ps/1ps \
 	-Wno-TIMESCALEMOD -Wno-PINMISSING -Wno-UNSIGNED -Wno-fatal
 
+# System timebase. 25 MHz (default) is fastest; 50 MHz is the hardware's and the
+# only one that can run its 32x tape turbo (see sim.v). Switching rebuilds.
+SIM_HZ ?= 25000000
+V_DEFINE += +define+SIM_CLK_HZ=$(SIM_HZ)
+CXX_DEFINE += -DSIM_CLK_HZ=$(SIM_HZ)u
+SIM_HZ_STAMP = obj_dir/sim_hz_$(SIM_HZ)
+
 # VCD tracing costs runtime even when idle; opt in with `make TRACE=1`.
 ifeq ($(TRACE),1)
 V_DEFINE += --trace
@@ -65,7 +72,9 @@ V_SRC = \
 	$(RTL)/rom.v \
 	$(RTL)/video.v \
 	$(RTL)/x74138.v \
-	$(RTL)/cassette.v
+	$(RTL)/cassette.v \
+	$(RTL)/tape_speed.v \
+	$(RTL)/tape_overlay.sv
 
 C_SRC = \
 	sim_main.cpp \
@@ -87,7 +96,14 @@ all: $(MEMS) $(EXE)
 $(MEMS):
 	ln -sf $(RTL)/$@ $@
 
-$(VOUT): $(V_SRC) Makefile
+# A different SIM_HZ than the last build: regenerate everything (make doesn't
+# notice changed flags by itself).
+$(SIM_HZ_STAMP):
+	rm -rf obj_dir
+	mkdir -p obj_dir
+	touch $@
+
+$(VOUT): $(V_SRC) Makefile $(SIM_HZ_STAMP)
 	$V -cc $(V_OPT) -LDFLAGS "$(LDFLAGS)" -exe --Mdir ./obj_dir \
 		$(V_DEFINE) $(V_INC) $(TOP) -CFLAGS "$(CXXFLAGS)" $(V_SRC) $(C_SRC)
 

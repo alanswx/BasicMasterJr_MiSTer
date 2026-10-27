@@ -12,13 +12,31 @@ byte-exact and the program runs.
 composition, and the optional MP-9730 cassette and MP-1803 floppy adapters. See
 [TODO.md](TODO.md) for the ordered roadmap.
 
-**Hardware verified:** the Quartus 17.0.2 release boots with stable HDMI, accepts
-keyboard input, mounts a tape through MiSTer, loads MAZY byte-for-byte, and runs it
-at `$1000`. The current build wraps the native 256x192 image in the MP-1710's
-320x240 bordered output and adds MiSTer video mixing; those new display modes need a
-final visual check.
+**Hardware verified:** the Quartus 17.0.2 build boots with stable HDMI at 320x240,
+accepts keyboard input, mounts a tape through MiSTer, loads MAZY byte-for-byte and
+runs it, and draws the MP-1710 border. In simulation, all 22 inufuto titles load
+byte-exact and match the CSP reference emulator pixel for pixel on their title
+screens. A tester build with the latest video fix is out for hardware testing.
 
 ---
+
+## OSD
+
+| Row | Values | Notes |
+|---|---|---|
+| Tape | `.bin` image | Mounting rewinds; the OSD says "Tape ready (rewound)" |
+| Tape speed | **32x**, Normal | A change takes effect the next time the tape starts |
+| Rewind tape | button | |
+| Scandoubler Fx | None, HQ2x, CRT 25/50/75% | |
+| Aspect ratio | Original, Full Screen, ARC1, ARC2 | |
+| Tape overlay | **On**, Off | Status bar while a tape plays |
+| Swap Alt/Win keys | **No**, Yes | Alt is the machine's カナ記号 (Kana Shift) key; Yes moves it to the Win keys |
+| Reset | button | |
+
+The rows follow `~/dev2/osd-standard.md` and `~/dev2/tape-standard.md` where they
+make sense: the same names and order as the other computer cores, but one flat
+page (there are only a few rows) and no "Apply and reset", because every setting
+here acts at once without changing the running machine.
 
 ## Video options
 
@@ -31,7 +49,7 @@ None, HQ2x, and CRT 25%/50%/75% scanlines. MiSTer gamma profiles are supported.
 ### On MiSTer hardware
 
 1. Copy tape images (`.bin`) somewhere under `/media/fat/games/BasicMasterJr/`.
-2. In the core's OSD choose **Load Tape** and pick the image.
+2. In the core's OSD choose **Tape** and pick the image.
 3. Mounting rewinds the tape to the start, so you can reload the same image freely.
 
 An MGL can launch the core and mount a tape in one step. For example, if the MGL
@@ -57,12 +75,22 @@ G 1000     <Space>       run it, from the program's entry address
 The **Space, not Return** terminator is real — it is how the monitor works, and it
 trips up everyone (MAME's driver notes it too). Type `L`, then the name, then Space.
 
-**Fast tape loading** defaults to On in the OSD. It accelerates the CPU and serial
-tape together by 16x only while the cassette motor is running, so the ROM still
-performs its normal filename, block and checksum processing. MAZY's 7,446-byte
-image takes roughly 15 seconds. Set **Fast tape loading** to Off for the original
-300-baud timing (about four minutes). The screen lists blocks as they load;
-`* ERROR` means the monitor rejected a command or detected bad tape data.
+**Tape speed** defaults to **32x** in the OSD. It runs the CPU and the serial tape
+together 32 times faster while the tape loads, so the ROM still performs its normal
+filename, block and checksum processing and sees exactly the bits it expects. MAZY's
+7,446-byte image loads in about 8 seconds; a BASIC program such as Gorilla (13,929
+bytes) in about 17. **Normal** is the original 300-baud timing (MAZY: about four and
+a half minutes). Turbo stays on for a quarter of a second after the motor stops,
+because BASIC's `LOAD` stops the motor after every block to store it; without that,
+half of every BASIC load ran at normal speed. A program may therefore start a
+fraction of a second fast after its last block. The screen lists blocks as they
+load; `* ERROR` means the monitor rejected a command or detected bad tape data.
+
+While the tape plays, **Tape overlay** (On by default) shows
+`TAPE ▶ 0:52/ 4:33 x32` and a progress bar in the bottom-left corner: elapsed and
+total time at the real 300 baud, and the speed. It disappears when the load is done.
+**Rewind tape** puts the tape back at the start (mounting a tape also rewinds it, and
+the OSD says "Tape ready (rewound)").
 
 BASIC programs (saved as ASCII, extension `.S` in the tape header) load with BASIC's
 own `LOAD` instead of the monitor's `L`.
@@ -88,15 +116,23 @@ cd vsim/
 
 ### Getting tape images
 
-None are included — they are other people's software. The sources are documented in
+What is in this repo, and where the rest comes from, is documented in
 [`software/README.md`](software/README.md); briefly:
 
-* **[inufuto](http://inufuto.web.fc2.com/8bit/)** — 22 homebrew games, actively
-  maintained, published for dozens of retro machines. Take the `bm` (ベーシックマスター)
-  build's `.s.bin` file: that is already the format this core wants.
-* **[Gaming Alexandria](https://www.gamingalexandria.com/wp/type-in-programs/)** —
-  period magazine type-ins, as WAV recordings.
+* **[inufuto](http://inufuto.web.fc2.com/8bit/)** — 22 homebrew games (+ UCHOTOS),
+  actively maintained, published for dozens of retro machines. Take the `bm`
+  (ベーシックマスター) build's `.s.bin` file: that is already the format this core
+  wants. Not committed here (no licence stated); download them yourself.
+* **`software/typein/`** — magazine type-ins as ready tape images: six transcribed
+  from マイコンBASICマガジン scans (Graphic Helmet, Gorilla, MISSILE FIGHT, Wine
+  Cellar, DRINK CAN, T.KUROKAWA) plus Graphic OPA and WILWESP from the
+  [Typing Task Force / Gaming Alexandria](https://www.gamingalexandria.com/wp/type-in-programs/).
+  Each has its listing, load commands and controls.
+* **`software/found/`** — zu2's BASICMASTER repository (Tiny Galaxy, Dendai Tiny
+  BASIC, LIFE2, …; `.cmt` files are the same byte stream and load as tapes).
 * TOSEC has a Basic Master Jr. set, but it is a subset of inufuto's own downloads.
+  (TOSEC's "Basic Master Jr. Level 3" set is really Level 3 software and does not run
+  here.)
 
 ### Tape image format, and converting your own
 
@@ -188,4 +224,9 @@ See [CLAUDE.md](CLAUDE.md) for the development workflow.
 * **maruhiro**'s [`bm2` emulator and `bmtape2`](https://ver0.sakura.ne.jp/pc/#bm2)
   were the reference for the cassette format and much of the I/O behaviour (BSD)
 * MB-6885 factory schematics published by [旧コン研](http://kyucom.sblo.jp/article/190792009.html)
-* Homebrew test software by [inufuto](http://inufuto.web.fc2.com/8bit/)
+* Homebrew test software by [inufuto](http://inufuto.web.fc2.com/8bit/) and
+  [zu2](https://github.com/zu2/BASICMASTER)
+* Takeda's [Common Source Code Project](https://takeda-toshiya.my.coocan.jp/) (eBASICMasterJr),
+  used headless as a reference emulator (`vsim/csp/`)
+* Type-ins from マイコンBASICマガジン (電波新聞社), scans preserved on archive.org,
+  and the Typing Task Force / Gaming Alexandria

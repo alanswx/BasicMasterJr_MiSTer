@@ -208,15 +208,25 @@ localparam CONF_STR = {
 	"-;",
 	// The extension field is 3-character extensions concatenated, so "Tape"
 	// was malformed (read as "Tap" plus a stray "e"). Tape images are .bin.
-	"F1,BIN,Load Tape;",
+	// Row names and order follow ~/dev2/osd-standard.md and tape-standard.md
+	// where they make sense: media, machine, video, input, reset. The menu
+	// stays flat (six rows don't need pages), and every setting acts at once
+	// (none of them changes the running machine), so there is no
+	// "Changes pending" / "Apply and reset". [118] was the old "Fast tape
+	// loading" and is left unused.
+	"F1,BIN,Tape;",
 	"-;",
-	"O[118],Fast tape loading,On,Off;",
+	"O[124],Tape speed,32x,Normal;",
+	"T[126],Rewind tape;",
+	"-;",
 	"O[117:115],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"O[125],Tape overlay,On,Off;",
 	"-;",
-	"T[0],Reset;",
-	"R[0],Reset and close OSD;",
+	"O[127],Swap Alt/Win keys,No,Yes;",
+	"-;",
+	"I,Tape ready (rewound);",
+	"R[0],Reset;",
 	"V,v",`BUILD_DATE
 };
 
@@ -232,6 +242,7 @@ wire  [7:0] ioctl_index;
 wire ioctl_wr;
 wire ioctl_download;
 wire ioctl_wait;
+reg  tape_info_req = 1'b0;   // pulses after a tape mount: "Tape ready (rewound)"
 
 hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
@@ -244,9 +255,11 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({status[5]}),
+	.status_menumask(16'd0),
 
 	.ps2_key(ps2_key),
+	.info_req(tape_info_req),
+	.info(8'd1),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_wr(ioctl_wr),
@@ -268,15 +281,32 @@ pll pll
 );
 
 
-// HD46800 CPU clock enable. The base increment is
-// round(750 kHz / 50 MHz * 2^32). With fast tape loading enabled (the default),
-// the cassette motor multiplies both this enable rate and the tape baud rate by
-// 16, preserving the monitor ROM's 2500 CPU cycles per tape bit.
+// HD46800 CPU clock enable, a phase accumulator stepping at 750 kHz on
+// clk_sys. OSD Tape speed 32x (the default) runs the CPU and the tape 32 times
+// faster together while a tape loads, preserving the monitor ROM's 2500 CPU
+// cycles per tape bit. See rtl/tape_speed.v.
 wire tape_motor;
-wire fast_tape_loading = ~status[118];
-wire [31:0] cpu_increment = tape_motor && fast_tape_loading
-                          ? (32'd64_424_509 << 4)
-                          : 32'd64_424_509;
+wire tape_end;
+wire tape_turbo;
+wire tape_active;
+wire [31:0] cpu_increment;
+wire [31:0] tape_bit_period;
+
+tape_speed #(.CLK_HZ(50_000_000), .SHIFT(5)) tape_speed(
+  .clk(clk_sys),
+  .enable(~status[124]),
+  .motor(tape_motor),
+  .tape_left(~tape_end),
+  // 50 MHz / 300 baud. This is the real rate -- it works because
+  // rtl/m6800_pad.v makes the CPU keep 6800 time. If tapes stop loading,
+  // check the CPU timing first (cd vsim/cputest && make && ./obj_dir/Vcputb --pad).
+  .base_period(32'd166667),
+  .turbo(tape_turbo),
+  .active(tape_active),
+  .cpu_increment(cpu_increment),
+  .bit_period(tape_bit_period)
+);
+
 reg [31:0] cpu_acc = 32'd0;
 wire [32:0] cpu_sum = {1'b0, cpu_acc} + {1'b0, cpu_increment};
 wire clk_cpu = cpu_sum[32];
@@ -308,8 +338,6 @@ wire [4:0] dac_level;
 wire [24:0] cassette_sdram_addr;
 wire tape_start;
 wire tape_stop;
-wire [31:0] tape_bit_period =
-  tape_motor && fast_tape_loading ? 32'd10417 : 32'd166667;
 
 // The tape image lives in a dedicated dual-port 64 KiB block RAM. hps_io
 // writes one port at full speed while the cassette reads the other, avoiding
@@ -317,18 +345,25 @@ wire [31:0] tape_bit_period =
 assign ioctl_wait = 1'b0;
 
 // Latch how many bytes the tape image holds, so the player knows where the
-// tape ends instead of wrapping through stale buffer data. Reset the
-// position whenever a new image is mounted.
-reg [24:0] tape_size;
+// tape ends instead of wrapping through stale buffer data. Rewind whenever a
+// new image is mounted (and say so: "Tape ready (rewound)") or on OSD Rewind
+// tape.
+reg [24:0] tape_size = 25'd0;
 reg        tape_rewind;
 wire [7:0] tape_buffer_data;
 always @(posedge clk_sys) begin
-  reg old_download;
+  reg old_download, old_rewind_button;
   old_download <= ioctl_download;
+  old_rewind_button <= status[126];
   tape_rewind <= 1'b0;
+  tape_info_req <= 1'b0;
   if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
     tape_size <= ioctl_addr + 25'd1;
-  if (old_download & ~ioctl_download)
+  if (old_download & ~ioctl_download & (ioctl_index == 8'd1)) begin
+    tape_rewind <= 1'b1;
+    tape_info_req <= 1'b1;
+  end
+  if (status[126] & ~old_rewind_button)
     tape_rewind <= 1'b1;
 end
 
@@ -369,11 +404,6 @@ ram tape_buffer(
 
 cassette cassette(
   .clk_sys(clk_sys),
-  // Tape bit period: 50 MHz / 300 baud. This is the real rate -- it works
-  // because rtl/m6800_pad.v makes the CPU keep 6800 time. Before that the
-  // monitor's software-timed bit loop ran ~19% fast and this had to be fudged
-  // to 145000. If tapes stop loading, check the CPU timing first
-  // (cd vsim/cputest && make && ./obj_dir/Vcputb --pad).
   .bit_period(tape_bit_period),
   .reset(reset),
   .tape_start(tape_start),
@@ -388,6 +418,7 @@ cassette cassette(
   .sdram_ready(1'b1),
   .tape_bit(adc_cassette_bit),
   .motor(tape_motor),
+  .tape_end(tape_end),
   .status()
 );
 
@@ -418,6 +449,7 @@ keyboard keyboard(
   .reset(reset),
   .clk_sys(clk_sys),
   .ps2_key(ps2_key),
+  .swap_alt_win(status[127]),
   .kb_col(kb_col),
   .kb_key(kb_key),
   .kb_mod(kb_mod),
@@ -432,6 +464,37 @@ wire [2:0] scanline_fx = video_fx ? video_fx - 3'd1 : 3'd0;
 wire scandoubler = forced_scandoubler | (video_fx != 3'd0);
 assign VGA_SL = scanline_fx[1:0];
 
+// Tape status bar, between the machine's picture and video_mixer.
+wire [41:0] tape_status_word;
+wire        tape_status_req, tape_status_ack;
+wire [23:0] overlay_rgb;
+
+tape_status tape_status(
+  .clk(clk_sys),
+  .loaded(tape_size != 25'd0),
+  .playing(tape_active),
+  .fast(tape_turbo),
+  .position(cassette_sdram_addr),
+  .length(tape_size),
+  .status(tape_status_word),
+  .req(tape_status_req),
+  .ack(tape_status_ack)
+);
+
+tape_overlay #(.FACTOR_BCD(8'h32)) tape_overlay(
+  .clk(clk_vid),
+  .ce_pix(ce_pix),
+  .hblank(hb),
+  .vblank(vb),
+  .enable(~status[125]),
+  .status(tape_status_word),
+  .req(tape_status_req),
+  .ack(tape_status_ack),
+  // Preserve the board's established red/green mapping.
+  .rgb_in({green, red, blue}),
+  .rgb_out(overlay_rgb)
+);
+
 video_mixer #(
   .LINE_LENGTH(324),
   .HALF_DEPTH(0),
@@ -443,10 +506,9 @@ video_mixer #(
   .scandoubler(scandoubler),
   .hq2x(video_fx == 3'd1),
   .gamma_bus(gamma_bus),
-  // Preserve the board's established red/green mapping.
-  .R(green),
-  .G(red),
-  .B(blue),
+  .R(overlay_rgb[23:16]),
+  .G(overlay_rgb[15:8]),
+  .B(overlay_rgb[7:0]),
   .HSync(hs),
   .VSync(vs),
   .HBlank(hb),

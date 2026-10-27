@@ -11,7 +11,7 @@ means both CPUs did the same thing, whatever the renderers make of it. Screensho
 in OUT/<title>/ and, if Pillow is importable, into OUT/montage.png (core left, CSP
 right). Writes OUT/report.txt.
 
-vsim runs with its default 16x fast tape, CSP at real 300 baud, so the load phase is
+vsim runs with its default tape turbo (16x, or 32x in a SIM_HZ=50000000 build), CSP at real 300 baud, so the load phase is
 scheduled separately for each; everything after G is the same number of frames.
 vsim also gets --key-hold 60: at the default 30 ms the monitor dropped the last S of
 OSOTOS. CSP's bmjr VM needed two colour fixes in ~/dev2/common_source_code before its

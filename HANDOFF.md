@@ -1,148 +1,199 @@
-# Handoff — timing-clean border/video-mixer build
+# Handoff
 
-Date: 2026-07-27. Branch: `tape-support`. Quartus Prime 17.0.2 Lite.
+Updated: 2026-10-24. Branch: `tape-support` (not yet merged to `master`). The last
+code commit is `1b100f6`. Quartus Prime 17.0.2 Lite runs on `misterubuntu`.
 
-## Current result
+## Where things stand
 
-The core now works on physical MiSTer hardware:
+The core works on a physical MiSTer. BASIC and the monitor boot, the keyboard works,
+and tapes load byte-exact and run. Sound, the timer IRQ, BREAK (NMI), the `$EFE0`
+graphics modes, blink, the MP-1710 colour adapter and its border, and MiSTer
+`video_mixer` are all in. **Tape save and the printer are the main missing
+features.** See `TODO.md`.
 
-- HDMI locks and displays the native 256x192 picture.
-- BASIC and MONITOR boot and accept keyboard input.
-- An MGL launches the core and mounts `mazy.s.bin` through `hps_io` index 1.
-- The complete 7,446-byte image reached the FPGA byte-for-byte.
-- MONITOR loaded all 5,560 program bytes at `$1000-$25B7` byte-for-byte.
-- `G 1000 <Space>` started MAZY and reached its `PUSH SPACE KEY` screen.
-- **Fast tape loading** is On by default and completes MAZY in about 15 seconds;
-  the user confirmed the 16x hardware load works perfectly. Off retains 300-baud timing.
+Verification:
 
-The installed test MGL is `/media/fat/.LASTLAUNCH.mgl`; its tape is
-`/media/fat/games/BasicMasterJr/mazy.s.bin`.
+- **Simulation:** `vsim/regression.sh` passes 7/7: 5 screenshot scenarios plus the
+  MAZY and ASCEND tape-load RAM diffs.
+- **CSP comparison:** all 22 inufuto titles load byte-exact in both the core
+  (Verilator) and the CSP reference emulator. Title screens are pixel-identical
+  (0.0%), and gameplay screens differ by at most 0.4%, which is expected timing
+  drift (`vsim/csp/compare_tapes.py`).
+- **Hardware (2026-07-27 build):** HDMI 320x240, keyboard, the MGL tape mount,
+  a byte-exact MAZY load checked over JTAG, the border (`POKE 59537,7` gives
+  white), and glyphs.
 
-## Current development build
+## OSD tidy-up (2026-10-26, NOT committed yet)
 
-The 2026-07-27 build adds three completed roadmap items:
+- **Menu:** follows the OSD and tape standards where sensible.
+  - The rows are now `Tape`, `Tape speed`, `Rewind tape`, `Scandoubler Fx`,
+    `Aspect ratio`, `Tape overlay`, `Swap Alt/Win keys` (new, bit 127) and `Reset`.
+  - The menu stays flat, with no Apply and reset. The Readme's OSD section says why.
+- **`rtl/keyboard.v`:** with the swap on, Win (E0 1F / E0 27) is カナ記号 and Alt
+  is ignored.
+- **`rtl/tape_speed.v`:** Tape speed is latched when the motor starts.
+- **Hardware (mister14, RBF `1a4f2a5d…6ace`, worst setup +0.290 ns, worst hold
+  +0.248 ns):** checked:
+  - The menu layout.
+  - The mount message from the file browser.
+  - Alt+Z gives ｯ with the swap off; Win+Z gives ｯ with it on.
+  - MAZY loads at 32x and runs.
+- **Regression:** 7/7.
 
-- Extended `JMP` (`$7E`) now takes exactly three 6800 clocks. The padded CPU suite reports all 200 measurable legal opcodes exact.
-- `$E891` now colors a 32-pixel horizontal and 24-line vertical MP-1710 border around the unchanged 256x192 machine image, producing 320x240 active video. Screen reverse selects the opposite color nibble, matching bm2.
-- Video now passes through MiSTer `video_mixer`, with forced scandoubling, HQ2x, CRT 25%/50%/75% scanlines, and gamma support. A 25 MHz video master provides four clocks per 6.25 MHz input pixel.
+## Tape speed 32x, tape overlay, Rewind tape (2026-10-25, NOT committed yet)
 
-The border/video-mixer build was exercised on the MiSTer at `192.168.1.198`:
-HDMI locked at 320x240 and `POKE 59537,7` changed the border to white. The
-hardware screenshot endpoint also exposed a one-column character-rendering
-regression. The corrected RBF described below is installed and hardware-tested:
-A, M, and V match the ROM glyphs, HDMI remains locked at 320x240, and
-`POKE 59537,7` produces a white border around the black 256x192 picture. The
-pre-fix image remains backed up as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf.bak`.
+Follows `~/dev2/tape-standard.md` (reference: the Sharp X1 core).
 
-## Bugs fixed
+- **`rtl/tape_speed.v`:** OSD **Tape speed** `32x` (default) / `Normal`, on new
+  status bit 124. The CPU enable and tape bit rate both go 32x while the motor
+  runs, and for 250 ms after it stops. BASIC `LOAD` stops the motor after every
+  block, and that used to run at 750 kHz, half of every BASIC load.
+- **`rtl/tape_overlay.sv`:** port of `x1_tape_overlay.sv`. **Tape overlay** On/Off
+  (bit 125) draws `TAPE ▶ m:ss/ m:ss x32` and a 64-step bar in the bottom border.
+  Times are exact: 11 bit-times per byte at 300 baud.
+- **Rewind tape** button (bit 126), and an `I,Tape ready (rewound)` message on mount.
+- **`rtl/dpram.v`:** CPU port A is now unregistered (one-clock reads).
+  - The first 32x build crashed every load on hardware. Port A had a registered
+    output, so reads took two clocks, and an enable 2 ticks apart read stale data.
+  - The sim passed because `vsim/rtl/dpram.v` modelled one clock on both ports.
+    The sim model now matches the hardware: port A one clock, port B two.
+  - Reproduced in sim: the old latency at 32x gave 269 of 5,560 bytes right.
+    With the fix, 5,560 of 5,560.
+- **Sim:** `make SIM_HZ=50000000` builds the hardware timebase and 32x. The default
+  25 MHz build can only do 16x. New flags: `--tape-overlay`, `--rewind-at`.
+  `--trace-tape` shows `turbo=`.
+- **Results:**
+  - Regression 7/7.
+  - 50 MHz sim: MAZY loads byte-exact in 503 frames (was 1007 at 16x).
+  - Gorilla loads in about 17 s (was about 60 s) and runs.
+- **mister14, RBF `2221b82d…12b53`:**
+  - Worst hold slack +0.199 ns (HDMI PLL). The system clock has +5.8 ns setup.
+  - MAZY loads in about 11 s and runs.
+  - Gorilla loads in about 20 s and runs in colour.
+  - The overlay shows in the bottom border.
+  - Rewind tape reloads from block 01.
+  - "Tape ready (rewound)" was not seen after an MGL mount.
+  - Files are in `/media/fat/bmjr_test/` and `/media/fat/games/BasicMasterJr/`.
+- **mister14 keyboard input:**
+  - `misterkvms-cli type` lost short inputs, apparently a new virtual keyboard per call.
+  - SharpMZ's `tools/mister_keys.py` (copied to `/tmp`) works, but the first keys
+    after a `load_core` are dropped.
+  - KVMS screenshots work (`--native` for pixel-exact). A wrapper with the right
+    `--mister`/`--stream` is in the session scratchpad.
 
-### Character first-column rendering
+## Tester build (2026-10-21)
 
-The dual-port system RAM registers both its video-port address and output. The
-pixel renderer originally waited only one cycle at each character boundary, so
-the first column used the preceding character code. This removed the left stroke
-from ROM glyphs whose bit 7 is set, most visibly A, M, and V. The renderer now
-waits for both RAM stages before starting the character-ROM lookup, and the
-framebuffer write enable follows the new final renderer state. All five screenshot
-goldens were refreshed; their changes are confined to that formerly stale
-character-cell column.
+`~/dev2/BasicMasterJr_tester_20261021.zip` is the folder of the same name, zipped.
+It holds:
 
-### Hardware CPU clock
+- the RBF built from `1b100f6`: SHA-256 `2c6c889a1e2d777f49f6160f24f65b74ecc5f23cdd6d8fd821eca4cfaa233c16`,
+  0 errors, 53 benign warnings, worst setup slack +0.764 ns, worst hold slack +0.249 ns
+- an example MAZY MGL
+- 34 tapes: 23 inufuto, 8 type-ins, and 3 zu2 programs (Tiny Galaxy, Dendai Tiny
+  BASIC, LIFE2)
+- the type-in docs
+- a README with the key map, the load commands for every title and an 8-point test
+  list
 
-`clk_cpu` is a one-cycle enable decoded from the 50 MHz divider, not a clock.
-The old design drove it into CPU clock ports, creating an unconstrained fabric
-clock that glitched on hardware and left the screen black. `rtl/core.v` now runs
-`m6800_pad` and `m6801` on `clk_sys`, using `clk_cpu` only as `cen_in`.
+No BIOS file is needed because the ROMs are built into the RBF.
 
-### Tape download path
+**This RBF has not been run on hardware yet.** It is the first hardware build with
+the video RGB/blanking fix below. The MiSTer at `192.168.1.198` still has the
+2026-07-27 glyph-fix build as `/media/fat/BasicMasterJr.rbf`. Backups there use
+`.rbf.bak`, so the MGL's name-only core lookup can't pick them.
 
-The original external-SDRAM path lost or misaligned bytes because the HPS write
-strobe, address/data, and SDRAM handshake did not line up reliably. The final
-path uses a dedicated 64 KiB dual-port block RAM:
-
-- `hps_io` writes port A at full speed.
-- The cassette reads port B at the selected authentic or fast timing.
-- `ioctl_wait` is tied low.
-- `sys/hps_io.sv` asserts `ioctl_wr` in the same cycle as `ioctl_addr` and
-  `ioctl_dout`.
-- Mounting a new image records its size and rewinds playback.
-
-Temporary JTAG source/probe instances used to prove both byte streams were
-removed from the release RTL after validation.
-
-## Fast tape loading
-
-The OSD exposes one compatibility control: **Fast tape loading: On / Off**. On is
-the default. While the cassette motor runs, the CPU clock enable and tape bit rate
-are both multiplied by 16, preserving the monitor timing ratio and all ROM filename,
-block, and checksum handling. The CPU returns to 750 kHz immediately when the motor
-stops. Off restores the original 300-baud tape timing.
-
-## Hardware validation evidence
-
-A diagnostic build exposed the tape RAM and CPU RAM over USB JTAG. The complete
-tape-buffer dump matched `mazy.s.bin` exactly. After real-time playback, the CPU
-RAM dump at `$1000-$25B7` also matched all 5,560 expected payload bytes with zero
-differences. Live cassette state advanced to position 7,444, then stopped at the
-monitor EOF boundary. The program was then started normally and rendered its
-title screen.
-
-The earlier apparent `* ERROR` was not a failed tape transfer. A clean replay
-ended at the monitor prompt; the error came from an incorrect follow-up command.
-Monitor commands are terminated with Space, not Return.
-
-## Build and timing
-
-Build command:
+To rebuild:
 
 ```bash
-~/intelFPGA_lite/quartus/bin/quartus_sh --flow compile BasicMasterJr
+git archive HEAD -- BasicMasterJr.qpf BasicMasterJr.qsf BasicMasterJr.sdc BasicMasterJr.srf \
+    BasicMasterJr.sv files.qip rtl sys | ssh misterubuntu 'mkdir ~/bmjr_build_X && tar -x -C ~/bmjr_build_X'
+ssh misterubuntu 'cd ~/bmjr_build_X && ~/intelFPGA_lite/quartus/bin/quartus_sh --flow compile BasicMasterJr'
 ```
 
-The glyph-fixed border/mixer build completes with 0 errors and 53 warnings.
-TimeQuest passes with +0.218 ns worst setup slack and +0.249 ns worst hold slack. The system and
-video PLL outputs are declared asynchronous, matching the explicit two-flop
-synchronizers and true dual-clock framebuffer at their boundaries. The RBF SHA-256
-is `cee0eb4b1a7d10b6be1fcd1c325e60a7850b513fc853a30ea2dfdaa46492a1e9`.
+A build takes about 4.5 minutes. `~/bmjr_build_1b100f6` on misterubuntu is the tree
+for the tester RBF.
 
-The remaining warnings are benign MiSTer/Quartus artifacts: inferred-ROM write
-pins, generated PLL nodes optimized away, deliberately idle SDRAM/ADC pins,
-SD/USER_IO output enables, LogicLock Lite licensing, and broad fast-I/O assignments.
+## Work since the 2026-07-27 hardware build
+
+### RTL / sim (commit `346b8f0`)
+
+- **Video RGB lagged blanking.** RGB arrived one `ce_pix` step after `hb`/`vb`/`hs`/`vs`:
+  1 px on hardware (BORDER=1) and 2 px in vsim (BORDER=0). `rtl/video.v` now samples
+  `vram_data` on the same `ce_pix` step that writes RGB. The counter drives internal
+  `hs_i`/`vs_i`/`hb_i`/`vb_i`, and the outputs are delayed one step so they line up.
+- **The sim dropped picture line 0.** In `vsim/sim/sim_video.cpp`, the vblank-falling
+  reset now runs before the hblank-falling line increment.
+- The golden images were re-blessed. Each change was exactly a 2 px left and 1 line
+  up shift, with no other differing pixels.
+
+### Reference emulator: CSP (commit `be21941`; CSP-side changes NOT committed)
+
+- `~/dev2/common_source_code` has a headless `bmjr` CLI (`MAC_BMJR_CLI.md`) that runs
+  about 300x faster than vsim. `vsim/csp/` holds `make_roms.py`, `compare_tapes.py`
+  (core against CSP for any list of tapes) and `typein.py`.
+- CSP's bmjr VM had two colour bugs, and both are fixed in the CSP working tree:
+  - `draw_screen` read `color_table[taddr]` with `taddr` starting at `$100`, so every
+    cell took the colour 8 rows below it. This was the main bug.
+  - `$E892` now follows bm2: bit 0 gates colour writes, and any write turns colour on.
+  - The CLI also accepts `.cmt` tapes.
+- **Open question for the user:** the CSP repo has many other people's uncommitted
+  changes besides these: `src/vm/bmjr/memory.*`, `src/mac/bmjr_cli.mm` and
+  `MAC_BMJR_CLI.md`. Should only the bmjr pieces be committed, or everything? No
+  answer yet.
+
+### Software (commits `9998085`, `da36daa`, `aa79764`, `1b100f6`)
+
+- `software/found/`: the zu2/BASICMASTER mirror (Tiny Galaxy, Dendai Tiny BASIC,
+  L2BASCOM, LIFE2, GAME68, KUMAJIRI, …) and inufuto UCHOTOS.
+- `software/found2/`: the type-in source survey. It includes an index of every
+  BM program in マイコンBASICマガジン with archive.org page hits
+  (`micombasic_archive_org/bemaga_bm_index.tsv`).
+- `software/typein/`: six programs transcribed from ベーマガ scans and built into
+  tapes with `vsim/csp/typein.py`: Graphic Helmet, Gorilla, MISSILE FIGHT, Wine
+  Cellar, DRINK CAN and T.KUROKAWA. Graphic OPA and WILWESP are also there. All of
+  them run in CSP. The page scans are git-ignored.
+- Tiny Galaxy is two separate tapes in zu2's repo. The tester zip joins them into
+  one (`cat galaxy.bin.cmt galaxy.bas.cmt`), and it works in CSP:
+  `MON`, `L GALAXY` Space, `E`, `LOAD GALAXY`, `RUN`. Dendai Tiny BASIC: `L DENDAI`,
+  `G 1000`. LIFE2's "black screen" is normal: the program waits for input.
+
+### State of the type-ins on the core (vsim)
+
+- **Graphic Helmet:** plays.
+- **DRINK CAN, WINE CELLAR, T.KUROKAWA:** reach gameplay in colour.
+- **Gorilla:** reaches its title screen only. A 120 ms injected key hold is too
+  short for its roughly 1.5 s INKEY$ poll, so this is a test problem, not a known
+  core bug.
+- **MISSILE FIGHT:** not yet tried on the core.
+
+## Related: Level 3 / MB-S1
+
+A tester sent Level 3 and S1 software. None of it runs on the Jr: those machines
+have a 6809, a different BASIC and a different tape format. A separate project was
+started at `~/dev2/BasicMasterL3_MiSTer/`, with a full `TODO.md` handoff (sources,
+MAME/CSP/EmuB references, reusable RTL, step 0 = a document/software download
+subagent).
+
+## Earlier history (2026-07, still relevant)
+
+- **Hardware CPU clock:** `clk_cpu` is an enable, not a clock. The CPU runs on
+  `clk_sys` with `cen_in`. Feeding the enable into clock ports glitched on hardware.
+- **Tape download:** the external-SDRAM path lost bytes. Tapes now go into a
+  dedicated 64 KiB dual-port BRAM: `hps_io` writes port A, the cassette reads port B,
+  and `ioctl_wait` is tied low.
+- **First-column glyph bug:** the renderer now waits for both RAM read stages before
+  the character-ROM lookup.
+- **Fast tape:** 16x CPU and tape rate only while the motor runs, which keeps the
+  ROM's 2500 CPU cycles per bit. Replaced 2026-10-25 by Tape speed 32x (above).
+- **The `* ERROR` seen on hardware** was a mistyped follow-up command: monitor
+  commands end with Space, not Return.
 
 ## Verification commands
 
 ```bash
-cd vsim
-make
-./regression.sh --no-tape
+cd vsim && make && ./regression.sh            # 7 tests
 ./tape_test.sh full ../software/inufuto/mazy.s.bin MAZY
-./tape_test.sh fast ../software/inufuto/mazy.s.bin MAZY
-
-cd cputest
-make
-./obj_dir/Vcputb --pad
+cd cputest && make && ./obj_dir/Vcputb --pad   # 6800 cycle accuracy
 ```
 
-The Verilator top mirrors the hardware tape RAM rather than the obsolete
-external-SDRAM tape path. Tape images are limited to 64 KiB.
-
-## Remaining work
-
-The glyph-fixed RBF is installed as `/media/fat/BasicMasterJr.rbf`; the pre-fix
-release is recoverable as `/media/fat/BasicMasterJr.pre-glyph-fix.rbf.bak`. All
-backup images use the `.rbf.bak` suffix so the MGL's name-only core lookup cannot
-select them. mRExt
-launched the exact RBF path, `/tmp/CORENAME` reports `BasicMasterJr`, and the
-MiSTer process command line confirms `/media/fat/BasicMasterJr.rbf`.
-
-The Verilator simulator now uses a timing-equivalent 25 MHz system timebase.
-CPU, video, cassette, keyboard and IRQ-watchdog rates are scaled so emulated
-time is unchanged, while a 120-frame headless run improved from 11.50 s to
-6.37 s on the development host (10.4 to 18.8 fps, about 1.8x). Screenshot
-goldens were refreshed because the asynchronous renderer phase changed; the
-differences were deterministic and confined to scanline zero. The screenshot
-suite, the 256-byte Fast Tape test and all 200 measurable padded CPU opcodes pass.
-
-Open functional work is tracked in `TODO.md`: tape saving, printer/expansion
-hardware, authentic mixed text/graphics composition, MP-9730 1200-baud tape,
-MP-1803 floppy research, and tape-format/tool cleanup.
+See `vsim/csp/README.md` for the CSP comparison and the type-in tools.
