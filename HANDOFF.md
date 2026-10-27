@@ -23,7 +23,16 @@ Verification:
   a byte-exact MAZY load checked over JTAG, the border (`POKE 59537,7` gives
   white), and glyphs.
 
-## OSD tidy-up (2026-10-26, NOT committed yet)
+## Tester build (2026-10-26)
+
+`~/dev2/BasicMasterJr_tester_20261026.zip` (folder of the same name) replaces the
+2026-10-21 one:
+- **RBF:** built from commit `2975917`, SHA-256 `1a4f2a5d…6ace`.
+- **Software:** the same 34 tapes as before.
+- **README:** a "new since" section, the new OSD rows, and test items for 32x,
+  the status bar and Rewind tape.
+
+## OSD tidy-up (2026-10-26, commit `2975917`)
 
 - **Menu:** follows the OSD and tape standards where sensible.
   - The rows are now `Tape`, `Tape speed`, `Rewind tape`, `Scandoubler Fx`,
@@ -40,7 +49,7 @@ Verification:
   - MAZY loads at 32x and runs.
 - **Regression:** 7/7.
 
-## Tape speed 32x, tape overlay, Rewind tape (2026-10-25, NOT committed yet)
+## Tape speed 32x, tape overlay, Rewind tape (2026-10-25, commit `2975917`)
 
 Follows `~/dev2/tape-standard.md` (reference: the Sharp X1 core).
 
