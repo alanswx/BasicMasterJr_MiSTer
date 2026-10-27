@@ -45,10 +45,13 @@
 //   at the end of the tape       start it    TYPE G 1000 <spc> / TYPE RUN <ret>
 //
 // The start hint goes away when its last key (Space or Return) is pressed.
+// After a recording the tape also sits at its end, so the start hint stays
+// off until the tape is rewound (which then shows the load hint).
 
 module tape_hint (
   input  logic         clk,
-  input  logic         wr,          // tape image byte written by hps_io
+  input  logic         wr,          // tape image byte written (download or recording)
+  input  logic         rec,         // ... by the recorder
   input  logic  [24:0] addr,
   input  logic   [7:0] data,
   input  logic  [24:0] position,    // cassette byte pointer
@@ -135,17 +138,19 @@ module tape_hint (
   wire run_bin  = b_valid ? b_bin : a_bin;
 
   // The start hint is dismissed by the key that ends it.
-  logic old_strobe, dismissed;
-  initial begin old_strobe = 0; dismissed = 0; end
+  logic old_strobe, dismissed, recorded;
+  initial begin old_strobe = 0; dismissed = 0; recorded = 0; end
   always_ff @(posedge clk) begin
     old_strobe <= ps2_key[10];
+    if (rec) recorded <= 1;
+    else if (at_start) recorded <= 0;
     if (!run) dismissed <= 0;
     else if (ps2_key[10] != old_strobe && ps2_key[9] &&
              ps2_key[7:0] == (run_bin ? 8'h29 : 8'h5A))
       dismissed <= 1;
   end
 
-  wire        want = loaded && !playing && (load_a || load_b || (run && !dismissed));
+  wire        want = loaded && !playing && (load_a || load_b || (run && !dismissed && !recorded));
   wire        t_bin  = load_b ? b_bin : a_bin;          // file being loaded
   wire [47:0] t_name = load_b ? b_name : a_name;
   wire        prev_bin = load_b ? a_bin : 1'b0;        // BASIC after power-on

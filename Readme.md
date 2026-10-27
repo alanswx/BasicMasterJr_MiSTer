@@ -5,12 +5,13 @@ HD46800 (6800-compatible) at 750 kHz, 32×24 text, 256×192 graphics, optional M
 colour adapter, Kansas City Standard cassette at 300 baud.
 
 **Working:** BASIC and the machine-language monitor, keyboard, 60 Hz timer interrupt,
-BREAK key (NMI), 5-bit DAC sound, and **cassette loading** — a real tape image loads
-byte-exact and the program runs.
+BREAK key (NMI), 5-bit DAC sound, and cassette loading **and saving**. Real images
+load byte-exact; BASIC SAVE is decoded from the machine's KCS output into a checksummed
+native tape image.
 
-**Not finished:** tape *saving*, printer/expansion hardware, authentic mixed-mode
-composition, and the optional MP-9730 cassette and MP-1803 floppy adapters. See
-[TODO.md](TODO.md) for the ordered roadmap.
+**Not finished:** printer/expansion hardware, authentic mixed-mode composition, and
+the optional MP-9730 cassette and MP-1803 floppy adapters. See [TODO.md](TODO.md)
+for the ordered roadmap.
 
 **Hardware verified:** the Quartus 17.0.2 build boots with stable HDMI at 320x240,
 accepts keyboard input, mounts a tape through MiSTer, loads MAZY byte-for-byte and
@@ -48,7 +49,8 @@ None, HQ2x, and CRT 25%/50%/75% scanlines. MiSTer gamma profiles are supported.
 
 ### On MiSTer hardware
 
-1. Copy tape images (`.bin`) somewhere under `/media/fat/games/BasicMasterJr/`.
+1. Copy tape images (`.bmt`, legacy `.bin`, or a saved `.sav`) somewhere under
+   `/media/fat/games/BasicMasterJr/`.
 2. In the core's OSD choose **Tape** and pick the image.
 3. Mounting rewinds the tape to the start, so you can reload the same image freely.
 
@@ -114,6 +116,26 @@ image:
 ./software/bmtape_info.py mytape.bin
 ```
 
+### Recording tapes on MiSTer
+
+The core records the real `$EE80` bit-0 KCS waveform; **Tape speed** 32x also
+speeds up saving without changing the bytes. To make a fresh recording:
+
+1. Copy [`software/blank.bmt`](software/blank.bmt) to the MiSTer with a unique name,
+   then select it under **Tape**. MiSTer loads that image and mounts a
+   growable save sidecar at `/media/fat/saves/BasicMasterJr/<name>.sav`.
+2. Choose **New tape recording** in the OSD. This rewinds and clears the FPGA tape
+   buffer; later motor starts append until this action is chosen again.
+3. Use the machine normally, for example enter a BASIC program and issue `SAVE TEST`.
+4. Wait for the cassette motor to stop. The core then flushes all recorded sectors to
+   the `.sav` sidecar. Do not reset or power off before the motor stops.
+
+The sidecar is itself a loadable tape image; `.sav` is accepted by the OSD. Rename it
+to `.bmt` when moving it out of MiSTer's save directory. The last 512-byte sector is
+padded with `$FF` leader bytes, so the on-disk file can be longer than the meaningful
+checksummed blocks. Use a new blank filename when replacing a prior recording because
+MiSTer's growable sidecars are not truncated when a shorter tape is written.
+
 ### In the simulator
 
 ```bash
@@ -122,6 +144,10 @@ cd vsim/
                --send-keys '75:MON\n' --send-keys '200:L' \
                --send-keys '260:MAZY' --send-keys '340: ' \
                --screenshot 15400 --stop-at-frame 15410
+
+./obj_dir/Vemu --headless --send-keys '75:10 PRINT "HI"\n' \\
+               --send-keys '180:SAVE TEST\n' --record-out saved.bmt \\
+               --stop-at-frame 700
 ```
 
 ### Getting tape images
@@ -145,6 +171,9 @@ What is in this repo, and where the rest comes from, is documented in
   here.)
 
 ### Tape image format, and converting your own
+
+`.bmt` is the canonical extension used by this core. Existing `.s.bin`/`.bin` images
+contain exactly the same bytes and remain supported.
 
 A tape image is **not audio**. It is the demodulated byte stream — exactly what the
 CPU reads one byte at a time out of `$EE80`. The machine demodulates the tape in

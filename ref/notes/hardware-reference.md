@@ -11,6 +11,7 @@ emulator guesswork:
 | **[TAPE2]** | maruhiro's `bmtape2` tape tool source (`ref/emulators/bmtape2/`) |
 | **[MAME]** | MAME `src/mame/hitachi/bmjr.cpp` |
 | **[DOC]** | Vendor/reference documentation (系統図, magazine, Wikipedia, 旧コン研 system list) |
+| **[IO82]** | Original I/O magazine scans from March-May 1982 (see `ref/README.md`) |
 
 Confidence is highest where **[SCH]** or **[ROM]** agrees with two independent emulators.
 
@@ -77,19 +78,37 @@ underneath in both emulators.
 ### `$EFE0` — screen mode
 
 ```
-$00        : text
-$40-$4F    : text + graphics page mixed  (bm2 alternates frames)
-$C0-$CF    : graphics only
-bits [3:0] : bitmap base = $0900 + $200 * (mode & 0x0F)
-             page 1 = $0900 ($C0..$CB), page 2 = $2100 ($CC..$CF)
+$00 : text
+$C0 : graphics page 1, base $0900
+$40 : text + graphics page 1, "superimpose"
+$CC : graphics page 2, base $2100
+$4C : text + graphics page 2, "superimpose"
 ```
+
+These exact five values come from the `PAGMOD` table in the assembly source of Hitachi's
+supplied colour-graphics utility, published in I/O May 1982. Its BASIC-facing `SCREEN`
+command also describes `$40` and `$4C` as text/graphics **superimpose** modes. The Hitachi
+user manual documents only the three ordinary choices `$00`, `$C0`, and `$CC`. [IO82]
+
 Bitmap layout is row-interleaved per character cell: byte at `base + col + row*8*32`, i.e.
 the 8 scanlines of one cell are 32 bytes apart. Colour/blink attributes still come from the
 per-cell colour RAM, so graphics mode is one fg/bg pair per 8×8 cell.
 
-MAME implements only `bit7` (the `$C0` case) and flags `bit6` as
-`<unknown, looks set in tandem with bit 7>` — the **`$40` mixed mode is missing from MAME**.
-The `$900 + ((mode & 0xf) << 9)` base calculation is identical in both. [BM2] [MAME]
+MAME implements only `bit7`, so `$40` displays as text and mixed mode is missing. MAME,
+current bm2, and another emulator generalize the low nibble as
+`$0900 + $200 * (mode & $0F)`, but the primary documentation exposes only nibble `$0` and
+`$C`, the two complete pages at `$0900` and `$2100`. Retain the generalized addressing
+unless hardware evidence contradicts it, but do not describe the intermediate offsets as
+documented pages. [BM2] [MAME] [IO82]
+
+The composition cadence is still unresolved. The factory schematic sends character-ROM and
+graphics-RAM bytes through IC79/IC80 (HD74LS157 selectors) into a single eight-bit
+parallel-to-serial video shift register (IC81). A direct eight-bit OR is not apparent, so
+bm2's whole-frame alternation may model real CRT-persistence multiplexing rather than merely
+faking an overlay. The remaining research task is to trace the IC79/IC80 select input in
+`$40/$4C` and determine whether it changes per frame, scanline, character, or some other
+interval. The CH32V203 BasicmasterEmulator instead ORs the two pattern bytes, which is useful
+independent evidence but not conclusive against the schematic. [SCH] [BM2] [IO82]
 
 ---
 
@@ -132,9 +151,8 @@ F7AA: 39        RTS                ; carry = received bit
 
 A 7× oversampling **majority vote** only makes sense against a demodulated level. [ROM]
 
-> **Consequence for this core:** feeding raw thresholded tape audio into `$EE80` (what
-> `rtl/cassette.v` does today via `tape_bit_raw`) cannot work. The unused `kc_bit` output in
-> that same file is the right idea.
+> **Core implementation:** `rtl/cassette.v` presents the decoded NRZ line directly
+> from the native byte stream; it does not threshold audio in the FPGA.
 
 ### 3.2 Output is bit-banged **in software**
 
@@ -157,6 +175,12 @@ F540: 7E F5 34  JMP  $F534
 
 `ANDB #$01` proves **tape out = D0**, which validates MAME's `BIT(data, 0)`. [ROM]
 
+The core now latches this bit in `rtl/core.v` and emits one `tape_write` strobe per
+CPU bus write. `rtl/cassette_recorder.v` follows bm2's measured-state decoder: it
+accumulates writes over 2433 upstream CPU enables and classifies more than 12 writes
+as mark/`1`. Counting CPU enables rather than `clk_sys` time makes 16x Fast Tape
+produce the same bytes as normal speed.
+
 ### 3.3 Kansas City Standard, 300 baud
 
 From `bmtape2/kansas.c` `putWaveBit()`, cross-checked against the ROM timing above:
@@ -176,8 +200,10 @@ bm2 clocks this at **2433 CPU states per bit**; at 750 kHz that is 3.244 ms ≈ 
 
 ### 3.4 Tape *image* format (the thing to load from SD)
 
-bm2's tape file is **not audio** — it is the raw demodulated byte stream, one byte per 11 bit
-times. `bmtape2` converts WAV ⟷ this byte stream ⟷ S-record/text. Recommended WAV for
+bm2's tape file is **not audio** — it is the raw demodulated byte stream, one byte per
+11-bit frame. The core names this raw stream `.bmt`; legacy `.bin` and MiSTer `.sav`
+sidecars carry the identical payload. Saved sidecars are sector-padded with `$FF` leader
+bytes. `bmtape2` converts WAV ⟷ this byte stream ⟷ S-record/text. Recommended WAV for
 capture is 44.1 kHz mono 8-bit; default FSK split frequency 1400 Hz. [TAPE2]
 
 Block structure inside the byte stream, **300 baud**:

@@ -33,6 +33,8 @@ module core #(
   input tape_bit,
   output reg tape_start,
   output reg tape_stop,
+  output reg tape_write,
+  output reg tape_out,
 
   output [4:0] dac_level  // 5-bit R-2R ladder value for the speaker
 );
@@ -267,6 +269,7 @@ always @(posedge clk_sys) begin
   io_out <= 8'hff;
   tape_start <= 1'b0;
   tape_stop <= 1'b0;
+  tape_write <= 1'b0;
   irq_ack <= 1'b0;
   if (reset) begin
     charcolor <= 8'b0000_0111;
@@ -279,6 +282,7 @@ always @(posedge clk_sys) begin
     kb_nmi_en <= 1'b0;
     kb_col <= 4'd0;
     dac <= 5'd0;
+    tape_out <= 1'b0;
   end
   else if (io_sel) begin
     case (cpu_addr)
@@ -311,13 +315,17 @@ always @(posedge clk_sys) begin
       end
       16'hee40: xor_disp <= cpu_dout;
       // Tape in / tape out + speaker. Reads give the demodulated serial line on
-      // bit 7. Writes latch IC40 (HD74LS174): bit 0 is the unimplemented tape output,
+      // bit 7. Writes latch IC40 (HD74LS174): bit 0 is the tape output,
       // bits 5:1 drive a 5-bit R-2R ladder into the speaker amp. [SCH, ROM $F535]
       16'hee80:
         if (cpu_rw)
           io_out <= { tape_bit, 7'd0 };
         else begin
-          dac      <= cpu_dout[5:1];
+          if (cpu_cen) begin
+            tape_out   <= cpu_dout[0];
+            tape_write <= 1'b1;
+            dac        <= cpu_dout[5:1];
+          end
         end
       16'heec0: begin // kb
         if (cpu_rw)

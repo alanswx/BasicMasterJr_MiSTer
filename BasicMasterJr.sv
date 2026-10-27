@@ -210,14 +210,16 @@ localparam CONF_STR = {
 	// was malformed (read as "Tap" plus a stray "e"). Tape images are .bin.
 	// Row names and order follow ~/dev2/osd-standard.md and tape-standard.md
 	// where they make sense: media, machine, video, input, reset. The menu
-	// stays flat (six rows don't need pages), and every setting acts at once
+	// stays flat (a few rows don't need pages), and every setting acts at once
 	// (none of them changes the running machine), so there is no
 	// "Changes pending" / "Apply and reset". [118] was the old "Fast tape
-	// loading" and is left unused.
-	"F1,BIN,Tape;",
+	// loading" and is left unused. FS1 also mounts a growable .SAV sidecar
+	// that recordings are written to (see the flush below).
+	"FS1,BMTBINSAV,Tape;",
 	"-;",
 	"O[124],Tape speed,32x,Normal;",
 	"T[126],Rewind tape;",
+	"T[119],New tape recording;",
 	"-;",
 	"O[117:115],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
@@ -245,6 +247,17 @@ wire ioctl_wr;
 wire ioctl_download;
 wire ioctl_wait;
 reg  tape_info_req = 1'b0;   // pulses after a tape mount: "Tape ready (rewound)"
+wire [31:0] sd_lba[1];
+wire        sd_rd = 1'b0;
+reg         sd_wr = 1'b0;
+wire        sd_ack;
+wire [13:0] sd_buff_addr;
+wire  [7:0] sd_buff_dout;
+wire  [7:0] sd_buff_din[1];
+wire        sd_buff_wr;
+wire        img_mounted;
+wire        img_readonly;
+wire [63:0] img_size;
 
 hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
@@ -268,7 +281,19 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ioctl_addr(ioctl_addr),
 	.ioctl_dout(ioctl_dout),
 	.ioctl_wait(ioctl_wait),
-	.ioctl_index(ioctl_index)
+	.ioctl_index(ioctl_index),
+
+	.sd_lba(sd_lba),
+	.sd_rd(sd_rd),
+	.sd_wr(sd_wr),
+	.sd_ack(sd_ack),
+	.sd_buff_addr(sd_buff_addr),
+	.sd_buff_dout(sd_buff_dout),
+	.sd_buff_din(sd_buff_din),
+	.sd_buff_wr(sd_buff_wr),
+	.img_mounted(img_mounted),
+	.img_readonly(img_readonly),
+	.img_size(img_size)
 );
 
 ///////////////////////   CLOCKS   ///////////////////////////////
@@ -340,6 +365,8 @@ wire [4:0] dac_level;
 wire [24:0] cassette_sdram_addr;
 wire tape_start;
 wire tape_stop;
+wire tape_write;
+wire tape_out;
 
 // The tape image lives in a dedicated dual-port 64 KiB block RAM. hps_io
 // writes one port at full speed while the cassette reads the other, avoiding
@@ -350,15 +377,46 @@ assign ioctl_wait = 1'b0;
 // tape ends instead of wrapping through stale buffer data. Rewind whenever a
 // new image is mounted (and say so: "Tape ready (rewound)") or on OSD Rewind
 // tape.
-reg [24:0] tape_size = 25'd0;
-reg        tape_rewind;
-wire [7:0] tape_buffer_data;
+//
+// The native .bmt image is the same decoded byte stream used by playback.
+// Recording overwrites it from byte zero after "New tape recording" and then
+// appends across motor stops, matching bm2's overwrite/append lifecycle.
+reg  [24:0] tape_size = 25'd0;
+reg         tape_rewind = 1'b0;
+reg         old_download = 1'b0;
+reg         old_rewind_button = 1'b0;
+wire  [7:0] tape_buffer_data;
+wire        recorder_wr;
+wire [15:0] recorder_addr;
+wire  [7:0] recorder_data;
+wire [16:0] recorder_size;
+wire        recorder_dirty;
+wire        recorder_overflow;
+reg         recorder_saved = 1'b0;
+
+cassette_recorder recorder (
+  .clk_sys(clk_sys),
+  .reset(reset),
+  .clear(status[119]),
+  .saved(recorder_saved),
+  .cpu_tick(clk_cpu),
+  .motor(tape_motor),
+  .write_strobe(tape_write),
+  .buffer_wr(recorder_wr),
+  .buffer_addr(recorder_addr),
+  .buffer_data(recorder_data),
+  .size(recorder_size),
+  .dirty(recorder_dirty),
+  .overflow(recorder_overflow)
+);
+
 always @(posedge clk_sys) begin
-  reg old_download, old_rewind_button;
   old_download <= ioctl_download;
   old_rewind_button <= status[126];
   tape_rewind <= 1'b0;
   tape_info_req <= 1'b0;
+  if (ioctl_download & ~old_download)
+    tape_size <= 25'd0;
   if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
     tape_size <= ioctl_addr + 25'd1;
   if (old_download & ~ioctl_download & (ioctl_index == 8'd1)) begin
@@ -367,7 +425,76 @@ always @(posedge clk_sys) begin
   end
   if (status[126] & ~old_rewind_button)
     tape_rewind <= 1'b1;
+  if (status[119]) begin
+    tape_size <= 25'd0;
+    tape_rewind <= 1'b1;
+  end
+  if (recorder_wr)
+    tape_size <= {8'd0, recorder_size};
 end
+
+// FS1 makes MiSTer mount a growable save sidecar as virtual disk 0. When the
+// motor stops, write all occupied 512-byte sectors. The final sector is padded
+// with mark bytes ($FF), which are harmless KCS leader in the raw stream.
+reg        save_mounted = 1'b0;
+reg  [2:0] flush_state = 3'd0;
+reg  [6:0] flush_lba = 7'd0;
+reg  [6:0] flush_last_lba = 7'd0;
+reg        tape_motor_d = 1'b0;
+localparam FLUSH_IDLE = 3'd0, FLUSH_REQ = 3'd1, FLUSH_DROP = 3'd2;
+
+wire [15:0] save_ram_addr = {flush_lba, sd_buff_addr[8:0]};
+wire [16:0] save_byte_offset = {1'b0, save_ram_addr};
+wire [16:0] tape_last_byte = tape_size[16:0] - 17'd1;
+assign sd_lba[0] = {25'd0, flush_lba};
+assign sd_buff_din[0] = (save_byte_offset < tape_size[16:0])
+                       ? tape_buffer_data : 8'hff;
+
+always @(posedge clk_sys) begin
+  tape_motor_d <= tape_motor;
+  recorder_saved <= 1'b0;
+  if (img_mounted)
+    save_mounted <= ~img_readonly;
+
+  if (reset) begin
+    sd_wr <= 1'b0;
+    flush_state <= FLUSH_IDLE;
+  end
+  else begin
+    case (flush_state)
+      FLUSH_IDLE: begin
+        sd_wr <= 1'b0;
+        if (tape_motor_d & ~tape_motor & recorder_dirty & save_mounted
+            & (tape_size != 25'd0)) begin
+          flush_lba <= 7'd0;
+          flush_last_lba <= tape_last_byte[15:9];
+          flush_state <= FLUSH_REQ;
+        end
+      end
+      FLUSH_REQ: begin
+        sd_wr <= 1'b1;
+        if (sd_ack) begin
+          sd_wr <= 1'b0;
+          flush_state <= FLUSH_DROP;
+        end
+      end
+      FLUSH_DROP: begin
+        if (!sd_ack) begin
+          if (flush_lba == flush_last_lba) begin
+            recorder_saved <= 1'b1;
+            flush_state <= FLUSH_IDLE;
+          end
+          else begin
+            flush_lba <= flush_lba + 7'd1;
+            flush_state <= FLUSH_REQ;
+          end
+        end
+      end
+      default: flush_state <= FLUSH_IDLE;
+    endcase
+  end
+end
+
 
 sdram sdram_inst(
   .init(sdram_init),
@@ -391,14 +518,20 @@ sdram sdram_inst(
   .SDRAM_nWE(SDRAM_nWE)
 );
 
-wire [15:0] tape_buffer_addr = cassette_sdram_addr[15:0];
+wire flushing = (flush_state != FLUSH_IDLE);
+wire [15:0] tape_buffer_addr = flushing ? save_ram_addr
+                                       : cassette_sdram_addr[15:0];
+wire [15:0] tape_buffer_write_addr = recorder_wr ? recorder_addr
+                                             : ioctl_addr[15:0];
+wire  [7:0] tape_buffer_write_data = recorder_wr ? recorder_data
+                                             : ioctl_dout;
 
 ram tape_buffer(
   .clk(clk_sys),
-  .addr(ioctl_addr[15:0]),
-  .din(ioctl_dout),
+  .addr(tape_buffer_write_addr),
+  .din(tape_buffer_write_data),
   .dout(),
-  .wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+  .wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
   .ce(1'b1),
   .addr_b(tape_buffer_addr),
   .dout_b(tape_buffer_data)
@@ -444,6 +577,8 @@ core core(
   .tape_bit(adc_cassette_bit),
   .tape_start(tape_start),
   .tape_stop(tape_stop),
+  .tape_write(tape_write),
+  .tape_out(tape_out),
   .dac_level(dac_level)
 );
 
@@ -476,11 +611,13 @@ wire   [4:0] tape_hint_len;
 wire [175:0] tape_hint_text;
 
 // What to type next while the deck is stopped (load, then start).
+// It watches the buffer's write port, so a recording updates it like a download.
 tape_hint tape_hint(
   .clk(clk_sys),
-  .wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
-  .addr(ioctl_addr),
-  .data(ioctl_dout),
+  .wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+  .rec(recorder_wr),
+  .addr({9'd0, tape_buffer_write_addr}),
+  .data(tape_buffer_write_data),
   .position(cassette_sdram_addr),
   .length(tape_size),
   .playing(tape_active),

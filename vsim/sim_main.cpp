@@ -86,6 +86,8 @@ std::vector<int> rewind_frames;
 int  stop_at_frame      = -1;
 std::vector<int> screenshot_frames;
 std::string tape_image;
+std::string record_output;
+std::vector<uint8_t> recorded_tape;
 std::string screenshot_prefix = "screenshot_frame";
 // Set by --screenshot-name: exact output path, used instead of the
 // prefix_NNNN.png naming. Only legal with a single --screenshot frame.
@@ -472,6 +474,12 @@ static int verilate()
 		if (trace_tape) tape_trace();
 		if (trace_key)  key_trace();
 
+		if (top->dbg_record_wr) {
+			recorded_tape.push_back(top->dbg_record_data);
+			if (trace_tape) printf("[record] byte[%u] = $%02X\n",
+			       (unsigned)top->dbg_record_addr, top->dbg_record_data);
+		}
+
 		main_time++;
 	}
 	return 1;
@@ -481,6 +489,21 @@ static void RunBatch(int steps) { for (int i = 0; i < steps; i++) verilate(); }
 
 // Actions that are gated on a frame number, shared by both run loops.
 // Returns true when the caller should stop.
+static void save_recorded_tape()
+{
+	if (record_output.empty()) return;
+	FILE* f = fopen(record_output.c_str(), "wb");
+	if (!f) {
+		fprintf(stderr, "Cannot write recorded tape: %s\n", record_output.c_str());
+		return;
+	}
+	if (!recorded_tape.empty())
+		fwrite(recorded_tape.data(), 1, recorded_tape.size(), f);
+	fclose(f);
+	printf("Recorded tape saved: %s (%zu bytes)\n",
+	       record_output.c_str(), recorded_tape.size());
+}
+
 static bool frame_actions(int frame)
 {
 	if (!key_injections.empty()) process_key_injections(frame);
@@ -505,6 +528,7 @@ static bool frame_actions(int frame)
 
 	if (stop_at_frame >= 0 && frame >= stop_at_frame) {
 		printf("Reached stop frame %d, exiting\n", frame);
+		save_recorded_tape();
 		for (size_t i = 0; i < watch_pcs.size(); i++)
 			printf("[watch] $%04X hit %llu times\n", watch_pcs[i],
 			       (unsigned long long)watch_hits[i]);
@@ -523,6 +547,7 @@ static void usage(const char* argv0)
 	"\n"
 	"  --headless                 run without a window (still renders for screenshots)\n"
 	"  --tape <file>              load a tape image over ioctl (index 1)\n"
+	"  --record-out <file>        save bytes produced through $EE80 tape output\n"
 	"  --screenshot N[,N,...]     write screenshot_frame_NNNN.png at these frames\n"
 	"  --screenshot-name <path>   override the output path for a single screenshot\n"
 	"  --stop-at-frame N          exit once frame N has been reached\n"
@@ -590,6 +615,7 @@ int main(int argc, char** argv, char** env)
 			}
 		}
 		else if (a == "--tape")              tape_image = next("--tape");
+		else if (a == "--record-out")         record_output = next("--record-out");
 		else if (a == "--screenshot-name")   screenshot_name = next("--screenshot-name");
 		else if (a == "--stop-at-frame")     stop_at_frame = atoi(next("--stop-at-frame").c_str());
 		else if (a == "--screenshot" || a == "-screenshot") {
@@ -767,5 +793,6 @@ int main(int argc, char** argv, char** env)
 	video.CleanUp();
 	input.CleanUp();
 #endif
+	save_recorded_tape();
 	return 0;
 }

@@ -22,9 +22,9 @@ Two independent emulators, the schematic, and the ROM all agree. `$EE80` bit 7 i
 serial line. MAME's implementation is a shortcut (it re-derives the bit from audio because
 MAME's cassette device stores audio) but the *interface it presents to the CPU is right*.
 
-**This core is currently wrong here** — `rtl/cassette.v` feeds `tape_bit_raw`, a raw
-comparator on the audio sample, straight to `$EE80`. The already-written-but-unconnected
-`kc_bit` in the same file is the correct signal shape.
+**Implemented:** `rtl/cassette.v` stores the decoded byte stream and shifts a clean NRZ
+line into `$EE80`; no FPGA audio thresholding is involved. The reverse path latches
+`$EE80.0` and decodes the ROM's KCS write cadence back into the same byte stream.
 
 Better still for an FPGA: skip audio entirely and adopt bm2's model — store the byte stream
 and shift it out as a UART at ~2433 CPU cycles/bit. No PLL, no filter, no WAV.
@@ -82,21 +82,36 @@ Bits 0-2 (RAM/ROM banking) are identical in both and confirmed by the ROM's use 
 ## 6. `$EFE0` mixed text+graphics mode → **MAME incomplete**
 
 MAME only tests `BIT(screen_mode, 7)` and annotates bit 6 as
-`<unknown, looks set in tandem with bit 7>`. bm2 enumerates three families:
+`<unknown, looks set in tandem with bit 7>`. The strongest primary source is the assembly
+source of Hitachi's supplied colour-graphics utility, published in I/O May 1982. Its
+five-entry `PAGMOD` table is:
 
 ```
-$00      text
-$40-$4F  text + graphics page, mixed
-$C0-$CF  graphics only
+$00  text
+$C0  graphics page 1 ($0900)
+$40  text + graphics page 1
+$CC  graphics page 2 ($2100)
+$4C  text + graphics page 2
 ```
 
-Software that sets `$40..$4F` renders as plain text under MAME and as a composite under bm2.
-The bitmap base formula `$900 + $200*(mode & 0xF)` is the same in both and matches the
-documented "256×192, 2 pages" — page 1 at `$0900`, page 2 at `$2100`.
+The utility's `SCREEN` documentation calls `$40` and `$4C` **superimpose** modes. The
+ordinary Hitachi manual documents only `$00`, `$C0`, and `$CC`, which explains why mixed
+mode is easy to miss. Software that writes `$40` renders as plain text under MAME and as a
+composite under bm2, so MAME is definitively incomplete.
 
-bm2 alternates whole frames to fake the mix; on real hardware this is presumably a genuine
-overlay. **Unresolved detail**: whether the mix is OR/overlay or interlaced-by-scanline.
-Worth confirming from the schematic's video section before implementing.
+MAME, bm2, and the CH32V203 BasicmasterEmulator all generalize the graphics base as
+`$900 + $200*(mode & $0F)`. That formula is consistent, but the primary documentation
+only names nibble `$0` and `$C` as the two full pages. Intermediate offsets should be
+treated as emulator-supported/undocumented behavior, not fourteen additional pages.
+
+**Composition remains unresolved, but the evidence has changed.** The CH32V203 emulator
+ORs character and graphics bytes pixel by pixel. Conversely, the factory schematic appears
+to feed those bytes through IC79/IC80 (HD74LS157 selectors) into one parallel-to-serial
+video shift register, with no obvious eight-bit OR stage. bm2's alternating frames may
+therefore represent authentic CRT-persistence multiplexing rather than a host-display
+shortcut. Before changing the core, trace the selector control in `$40/$4C` and establish
+whether its cadence is per frame, scanline, character, or pixel. The I/O article proves
+that the intended result is superimposition, but does not state that cadence.
 
 ---
 

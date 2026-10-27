@@ -72,6 +72,7 @@ V_SRC = \
 	$(RTL)/rom.v \
 	$(RTL)/video.v \
 	$(RTL)/x74138.v \
+	$(RTL)/cassette_recorder.v \
 	$(RTL)/cassette.v \
 	$(RTL)/tape_speed.v \
 	$(RTL)/tape_overlay.sv
@@ -110,8 +111,12 @@ $(VOUT): $(V_SRC) Makefile $(SIM_HZ_STAMP)
 $(EXE): $(VOUT) $(C_SRC)
 	(cd obj_dir; make -f Vemu.mk OBJCACHE= OPT_FAST="-O2" OPT_SLOW="-O0" OPT_GLOBAL="-O2")
 
+recorder-test:
+	iverilog -g2012 -Wall -s recorder_test -o /tmp/basicmaster_recorder_test $(RTL)/cassette_recorder.v recorder_test.sv
+	vvp /tmp/basicmaster_recorder_test
+
 clean:
 	rm -rf obj_dir
 	rm -f $(MEMS)
 
-.PHONY: all clean
+.PHONY: all clean recorder-test

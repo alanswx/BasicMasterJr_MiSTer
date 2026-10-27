@@ -22,6 +22,34 @@ Verification:
 - **Hardware (2026-07-27 build):** HDMI 320x240, keyboard, the MGL tape mount,
   a byte-exact MAZY load checked over JTAG, the border (`POKE 59537,7` gives
   white), and glyphs.
+- **Tape saving (2026-07-28 hardware build, merged 2026-10-27):** BASIC `SAVE`
+  on the 192.168.1.198 MiSTer produced a `record-test.sav` with four
+  checksum-valid blocks and `$FF` padding to its 512-byte boundary. Not yet
+  re-tested on hardware since the merge with Tape speed 32x.
+
+## Tape saving merged (2026-10-27)
+
+`fork/tape-support` had a separate commit, `f603e6f` "Add native tape recording and
+MiSTer save support" (2026-07-28, built on `07d4afe`), that never reached this
+tree. It is now merged:
+- `rtl/cassette_recorder.v` decodes the ROM's `$EE80` bit-0 KCS output in CPU
+  enables (so turbo doesn't affect it) and writes bytes into the tape RAM. It
+  follows bm2's overwrite/append behaviour.
+- The OSD `Tape` row is `FS1,BMTBINSAV`: it also mounts a growable `.sav` sidecar.
+  When the motor stops, every occupied 512-byte sector is written to it. **New
+  tape recording** (bit 119) clears the buffer.
+- `.bmt` is the native extension (the same byte stream as `.bin`);
+  `software/blank.bmt` is an empty one.
+- The hint parser reads the tape RAM's write port, so it follows recordings as
+  well as downloads.
+- `make recorder-test` (iverilog) runs `vsim/recorder_test.sv`.
+- **Changes made in the merge:**
+  - `rtl/tape_speed.v`: turbo now runs whenever the motor runs, so saves are fast
+    again. Only the 250 ms hold still needs tape left to play. In the 16x sim, a
+    `SAVE TEST` ends at frame 347 instead of 1,293, and the 348-byte result is
+    identical at both speeds and passes `bmtape_info.py`.
+  - The hint skips the start hint after a recording (the position sits at the end
+    of what was saved). After Rewind tape it shows `TYPE LOAD TEST ↵`.
 
 ## Type-next hint and the reset row (2026-10-27)
 

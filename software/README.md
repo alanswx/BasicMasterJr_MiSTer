@@ -40,6 +40,9 @@ Loadable zu2 tapes (the `.cmt` files are the same byte stream as `.bin`):
 | `found/zu2_BASICMASTER/life2/life2.cmt` | `MON`, `L LIFE2` Space, `G 3000` Space | clears the screen and waits for input (that is not a hang) |
 | `found/inufuto_uchotos/uchotos.s.bin` | `MON`, `L UCHOTO` Space, `G 2200` Space | |
 
+`blank.bmt` — an empty native tape image. Copy it under a unique name and select it
+with the OSD **Tape** entry to create a fresh growable save sidecar.
+
 `bmtape_info.py` — decodes and checksum-verifies a tape image. Also a download
 integrity check; it exits non-zero if anything fails.
 
@@ -61,11 +64,11 @@ already in the byte-stream tape format.
 
 ## Format
 
-The `.s.bin` files are **tape images in the byte-stream format**, not audio: the
-demodulated serial bytes the CPU reads one at a time out of `$EE80`. That is the
-format `bm2` loads and the format this core should grow into — see
-`ref/notes/mame-vs-bm2-verdicts.md` §1. Each file starts with a run of `$FF`
-(the 300-baud leader) followed by `$01` block-start markers.
+`.bmt` is the core's canonical extension for the decoded byte stream. The `.s.bin`
+files are **the same tape image format**, not audio: the demodulated serial bytes the
+CPU reads one at a time out of `$EE80`. `.bin` remains supported for compatibility,
+and MiSTer's generated `.sav` sidecars are directly loadable too. Each file starts
+with a run of `$FF` (the 300-baud leader) followed by `$01` block-start markers.
 
 Block layout, per `ref/emulators/bmtape2/bmtape2/bm.c`:
 
@@ -156,6 +159,13 @@ Tape loading works end to end in both Verilator and on a physical MiSTer. The
 hardware test mounted `mazy.s.bin`, transferred all 7,446 image bytes into the
 64 KiB on-chip tape buffer, loaded all 5,560 program bytes byte-for-byte into
 `$1000-$25B7`, and ran MAZY at `$1000`.
+
+BASIC tape saving is verified end to end in Verilator and on physical MiSTer
+hardware. In simulation, `SAVE TEST` produced a 349-byte native image. On MiSTer,
+the same path flushed a 512-byte `record-test.sav` sidecar. Both files' headers,
+data and checksums pass `bmtape_info.py`; the hardware file ends in intentional
+`$FF` sector padding. The KCS decoder measures upstream CPU enables, so normal and
+16x Fast Tape operation produce identical bytes.
 
 The simulator uses the same dual-port buffer architecture. `vsim/tape_test.sh`
 checks loaded RAM against the tape image; its `full` mode also executes the

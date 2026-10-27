@@ -65,6 +65,12 @@ module emu (
 	output     [24:0] dbg_tape_addr,
 	output     [24:0] dbg_tape_size,
 	output      [7:0] dbg_tape_byte,
+	output            dbg_record_wr,
+	output     [15:0] dbg_record_addr,
+	output      [7:0] dbg_record_data,
+	output     [16:0] dbg_record_size,
+	output            dbg_record_dirty,
+	output            dbg_record_overflow,
 	output      [7:0] dbg_screen_mode,
 	output      [7:0] dbg_kb_col,
 	output      [3:0] dbg_kb_key,
@@ -148,13 +154,32 @@ wire core_reset = reset | ioctl_download;
 // SDRAM handshake in the tape path, so downloads can accept one byte per tick.
 wire [24:0] tape_addr;
 wire  [7:0] tape_buffer_data;
+wire        tape_write;
+wire        tape_out;
+wire        recorder_wr;
+wire [15:0] recorder_addr;
+wire  [7:0] recorder_data;
+wire [16:0] recorder_size;
+wire        recorder_dirty;
+wire        recorder_overflow;
+
+cassette_recorder recorder (
+	.clk_sys(clk_sys), .reset(core_reset), .clear(1'b0), .saved(1'b0),
+	.cpu_tick(clk_cpu), .motor(tape_motor), .write_strobe(tape_write),
+	.buffer_wr(recorder_wr), .buffer_addr(recorder_addr),
+	.buffer_data(recorder_data), .size(recorder_size),
+	.dirty(recorder_dirty), .overflow(recorder_overflow)
+);
+
+wire [15:0] tape_write_addr = recorder_wr ? recorder_addr : ioctl_addr[15:0];
+wire  [7:0] tape_write_data = recorder_wr ? recorder_data : ioctl_dout;
 
 ram tape_buffer (
 	.clk    (clk_sys),
-	.addr   (ioctl_addr[15:0]),
-	.din    (ioctl_dout),
+	.addr   (tape_write_addr),
+	.din    (tape_write_data),
 	.dout   (),
-	.wr     (ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+	.wr     (recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
 	.ce     (1'b1),
 	.addr_b (tape_addr[15:0]),
 	.dout_b (tape_buffer_data)
@@ -185,6 +210,8 @@ always @(posedge clk_sys) begin
 	tape_rewind <= 1'b0;
 	if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
 		tape_size <= ioctl_addr + 25'd1;
+	if (recorder_wr)
+		tape_size <= {8'd0, recorder_size};
 	if (old_download & ~ioctl_download & (ioctl_index == 8'd1))
 		tape_rewind <= 1'b1;
 	if (tape_rewind_btn & ~old_rewind_btn)
@@ -231,6 +258,8 @@ core #(.VIDEO_BORDER(0), .SYS_CLK_HZ(SIM_CLK_HZ)) core (
 	.tape_bit   (tape_bit),
 	.tape_start (tape_start),
 	.tape_stop  (tape_stop),
+	.tape_write (tape_write),
+	.tape_out   (tape_out),
 	.dac_level  (dac_level)
 );
 
@@ -258,9 +287,10 @@ wire [175:0] tape_hint_text;
 // What to type next while the deck is stopped (load, then start).
 tape_hint tape_hint(
 	.clk(clk_sys),
-	.wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
-	.addr(ioctl_addr),
-	.data(ioctl_dout),
+	.wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+	.rec(recorder_wr),
+	.addr({9'd0, tape_write_addr}),
+	.data(tape_write_data),
 	.position(tape_addr),
 	.length(tape_size),
 	.playing(tape_active),
@@ -330,6 +360,12 @@ assign dbg_tape_state = cassette.state;
 assign dbg_tape_addr  = cassette.sdram_addr;
 assign dbg_tape_size  = tape_size;
 assign dbg_tape_byte  = cassette.shifter;
+assign dbg_record_wr       = recorder_wr;
+assign dbg_record_addr     = recorder_addr;
+assign dbg_record_data     = recorder_data;
+assign dbg_record_size     = recorder_size;
+assign dbg_record_dirty    = recorder_dirty;
+assign dbg_record_overflow = recorder_overflow;
 assign dbg_screen_mode = core.screen_mode;
 assign dbg_kb_col     = {4'd0, kb_col};
 assign dbg_kb_key     = kb_key;

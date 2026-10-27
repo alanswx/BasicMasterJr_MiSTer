@@ -5,8 +5,9 @@
 // 2^SHIFT times faster together: the loader sees the same bit in its own units.
 // Nothing else speeds up (video, the timer IRQ and the keyboard stay real-time).
 //
-// Turbo is on while the motor runs and for HOLD_MS after it stops, as long as
-// the tape has bytes left. BASIC's LOAD stops the motor after every block of
+// Turbo is on while the motor runs (loading or saving: the recorder measures
+// in CPU enables, so a save is the same at any speed) and for HOLD_MS after it
+// stops, as long as the tape has bytes left. BASIC's LOAD stops the motor after every block of
 // an ASCII (.S) program while it stores the text, about 45 frames per block at
 // 750 kHz -- half of every BASIC load. The hold keeps those stops fast; at 32x
 // a stop takes ~25 ms. The cost is that a program may start up to HOLD_MS fast
@@ -28,7 +29,7 @@ module tape_speed #(
   input             clk,
   input             enable,             // OSD Tape speed: Nx (not Normal)
   input             motor,              // cassette relay ($EE20 on, $EE00 off)
-  input             tape_left,          // a tape is mounted and not played out
+  input             tape_left,          // a tape is mounted and not played out (for the hold)
   input      [31:0] base_period,        // clk ticks per tape bit at 300 baud
   output            turbo,
   output            active,
@@ -61,7 +62,7 @@ module tape_speed #(
     end
   end
 
-  assign turbo  = fast & tape_left & (motor | (hold != 32'd0));
+  assign turbo  = fast & (motor | (tape_left & (hold != 32'd0)));
   assign active = tape_left & (motor | (show != 32'd0));
 
   assign cpu_increment = turbo ? (BASE_INC[31:0] << SHIFT) : BASE_INC[31:0];
