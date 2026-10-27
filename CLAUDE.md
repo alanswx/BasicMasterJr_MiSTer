@@ -136,7 +136,9 @@ preserving the ROM loader's 2500 CPU cycles per bit (`rtl/tape_speed.v`). **Norm
 is the real 300-baud rate (`.bit_period` = 166667). That only works because
 `rtl/m6800_pad.v` makes the CPU keep 6800 time — see below. If tapes stop loading,
 check CPU timing first. **Tape overlay** (`rtl/tape_overlay.sv`) draws
-`TAPE ▶ m:ss/ m:ss x32` and a progress bar while a tape plays; **Rewind tape**
+`TAPE ▶ m:ss/ m:ss x32` and a progress bar while a tape plays, and while it is
+stopped a hint of what to type next (`tape_hint`: parses the block headers as the
+image downloads; text comes from the machine's character ROM); **Rewind tape**
 rewinds. These follow `~/dev2/tape-standard.md` (the Sharp X1 core is its reference).
 
 The default sim build runs a 25 MHz timebase, which can only do **16x** (a 24 MHz CPU

@@ -43,13 +43,20 @@ cd vsim/cputest && make && ./obj_dir/Vcputb --pad   # CPU cycle accuracy
       SIM_HZ=50000000` build (32x). Not done yet: the CSP build in the scratchpad
       had been cleaned away.
 - [x] OSD and tape standards (2026-10-26), adopted where they make sense: `Tape`
-      row name, rows in standard order, one `Reset`, `Swap Alt/Win keys` (tested on
+      row name, rows in standard order, one `Reset and close OSD`, `Swap Alt/Win keys` (tested on
       mister14: Win types カナ記号 when swapped), Tape speed latched when the motor
       starts. Deliberately skipped: submenu pages and Apply and reset / Changes pending
       (few rows, no setting changes the running machine), Load ROM (ROMs are built
       in), Tape audio, quick start (no autoboot path). Deliberate deviations: turbo
       (250 ms) and the overlay (1.5 s) stay on after the motor stops, because BASIC
       stops it after every block.
+- [x] **Type-next hint** (2026-10-27): with the deck stopped, the overlay shows
+      `TYPE MON ↵ L MAZY ␣`, then `TYPE G 1000 ␣` at the end of the tape (`RUN` /
+      `LOAD` for BASIC tapes, `E ↵ LOAD NAME ↵` between the two files of Tiny Galaxy).
+      Checked in sim on MAZY (through to the game), Gorilla and Tiny Galaxy.
+- [x] Reset row renamed `Reset and close OSD`, and it did nothing when selected: Main's
+      Enter handler counts the undrawn `I,` line as a row, so the `I,` line now
+      comes after it.
 - [ ] Optional auto-type (like SharpMZ's `rtl/tape_autotype.sv`): from the tape
       header, type `MON` / `L NAME` Space / `G addr` Space for `.B` files, or
       `LOAD NAME` / `RUN` for `.S`. The tape format holds no start address; the first

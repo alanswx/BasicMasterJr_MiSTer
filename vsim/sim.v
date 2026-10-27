@@ -247,9 +247,28 @@ keyboard keyboard (
 );
 
 //////////////////////////////  TAPE OVERLAY  ////////////////////////////////
-wire [41:0] tape_status_word;
+wire [223:0] tape_status_word;
 wire        tape_status_req, tape_status_ack;
 wire [23:0] overlay_rgb;
+
+wire         tape_hint_show;
+wire   [4:0] tape_hint_len;
+wire [175:0] tape_hint_text;
+
+// What to type next while the deck is stopped (load, then start).
+tape_hint tape_hint(
+	.clk(clk_sys),
+	.wr(ioctl_download & ioctl_wr & (ioctl_index == 8'd1)),
+	.addr(ioctl_addr),
+	.data(ioctl_dout),
+	.position(tape_addr),
+	.length(tape_size),
+	.playing(tape_active),
+	.ps2_key(ps2_key),
+	.show(tape_hint_show),
+	.len(tape_hint_len),
+	.text(tape_hint_text)
+);
 
 tape_status tape_status (
 	.clk     (clk_sys),
@@ -258,6 +277,9 @@ tape_status tape_status (
 	.fast    (tape_turbo),
 	.position(tape_addr),
 	.length  (tape_size),
+	.hint_show(tape_hint_show),
+	.hint_len(tape_hint_len),
+	.hint_text(tape_hint_text),
 	.status  (tape_status_word),
 	.req     (tape_status_req),
 	.ack     (tape_status_ack)

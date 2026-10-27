@@ -29,9 +29,9 @@ screens. A tester build with the latest video fix is out for hardware testing.
 | Rewind tape | button | |
 | Scandoubler Fx | None, HQ2x, CRT 25/50/75% | |
 | Aspect ratio | Original, Full Screen, ARC1, ARC2 | |
-| Tape overlay | **On**, Off | Status bar while a tape plays |
+| Tape overlay | **On**, Off | Status bar while a tape plays; what to type next while it is stopped |
 | Swap Alt/Win keys | **No**, Yes | Alt is the machine's カナ記号 (Kana Shift) key; Yes moves it to the Win keys |
-| Reset | button | |
+| Reset and close OSD | button | |
 
 The rows follow `~/dev2/osd-standard.md` and `~/dev2/tape-standard.md` where they
 make sense: the same names and order as the other computer cores, but one flat
@@ -91,6 +91,16 @@ While the tape plays, **Tape overlay** (On by default) shows
 total time at the real 300 baud, and the speed. It disappears when the load is done.
 **Rewind tape** puts the tape back at the start (mounting a tape also rewinds it, and
 the OSD says "Tape ready (rewound)").
+
+While the tape is stopped, the same corner says what to type next, read from the
+tape's block headers: `TYPE MON ↵ L MAZY ␣` (or `TYPE LOAD GORILA ↵` for a BASIC
+tape) before loading, and `TYPE G 1000 ␣` (or `TYPE RUN ↵`) once the tape has played
+to the end, until that last Space or Return is pressed. On a tape holding a
+machine-code file and then a BASIC one (Tiny Galaxy, MISSILE FIGHT) it shows
+`TYPE E ↵ LOAD GALAXY ↵` between the two. The start address is the first block's
+load address; the tape format has no start address, but that is right for every
+machine-code tape we have. A `CALL $E37E` some type-ins need first is not on the
+tape, so the hint can't show it.
 
 BASIC programs (saved as ASCII, extension `.S` in the tape header) load with BASIC's
 own `LOAD` instead of the monitor's `L`.

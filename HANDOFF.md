@@ -1,6 +1,6 @@
 # Handoff
 
-Updated: 2026-10-24. Branch: `tape-support` (not yet merged to `master`). The last
+Updated: 2026-10-27. Branch: `tape-support` (not yet merged to `master`). The last
 code commit is `1b100f6`. Quartus Prime 17.0.2 Lite runs on `misterubuntu`.
 
 ## Where things stand
@@ -22,6 +22,30 @@ Verification:
 - **Hardware (2026-07-27 build):** HDMI 320x240, keyboard, the MGL tape mount,
   a byte-exact MAZY load checked over JTAG, the border (`POKE 59537,7` gives
   white), and glyphs.
+
+## Type-next hint and the reset row (2026-10-27)
+
+- **Hint line** (`tape_hint` in `rtl/tape_overlay.sv`): while the deck is stopped,
+  the overlay box shows what to type next. It is read from the block headers as
+  the image downloads.
+  - Before loading: `TYPE MON ↵ L MAZY ␣`, or `TYPE LOAD GORILA ↵` for a BASIC tape.
+  - At the end of the tape: `TYPE G 1000 ␣` or `TYPE RUN ↵`, until that last Space
+    or Return is pressed.
+  - On a tape with a machine-code file and then a BASIC one: `TYPE E ↵ LOAD GALAXY ↵`
+    between the two.
+  - The start address is the first block's load address. The overlay now draws
+    with the machine's character ROM (a second copy on `clk_vid`).
+- **Reset row:** renamed `Reset and close OSD`. It did nothing when selected,
+  because Main's Enter handler (`menu.cpp`) counts the undrawn `I,` line as a row
+  and the `I,` line sat just above it. The `I,` line now comes last.
+- **Checks:**
+  - Sim: MAZY all the way to the game, plus Gorilla and Tiny Galaxy hints.
+    Regression 7/7.
+  - Hardware: RBF `49c39b45…4356` (worst hold +0.249 ns). On mister14 the load
+    hint shows in the bottom border after an MGL mount.
+  - Installed on mister12 (10.0.2.12) as `_Computer/BasicMasterJr_20261027b.rbf`
+    with all 34 tapes in `games/BasicMasterJr/`. Older RBFs are in
+    `/media/fat/bmjr_old/`.
 
 ## Tester build (2026-10-26)
 
