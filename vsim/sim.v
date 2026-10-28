@@ -149,6 +149,9 @@ assign dbg_cpu_ce = clk_cpu;
 wire core_reset = reset | ioctl_download;
 
 //////////////////////////////  TAPE BUFFER  ///////////////////////////////////
+// Main sends the file's position in the row's extension list (BMT, BIN, SAV)
+// in ioctl_index[7:6] (menu.cpp), so a .bin arrives as $41: match the slot only.
+wire tape_ioctl = ioctl_index[5:0] == 6'd1;
 // Match the hardware top: HPS downloads into a dedicated 64 KiB dual-port
 // block RAM, and the cassette reads its second port. There is no external
 // SDRAM handshake in the tape path, so downloads can accept one byte per tick.
@@ -179,13 +182,14 @@ ram tape_buffer (
 	.addr   (tape_write_addr),
 	.din    (tape_write_data),
 	.dout   (),
-	.wr     (recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+	.wr     (recorder_wr | (ioctl_download & ioctl_wr & tape_ioctl)),
 	.ce     (1'b1),
 	.addr_b (tape_addr[15:0]),
 	.dout_b (tape_buffer_data)
 );
 
 assign ioctl_wait = 1'b0;
+
 
 //////////////////////////////  CORE  ////////////////////////////////////////
 wire        hs, vs, hb, vb;
@@ -208,11 +212,11 @@ always @(posedge clk_sys) begin
 	old_download <= ioctl_download;
 	old_rewind_btn <= tape_rewind_btn;
 	tape_rewind <= 1'b0;
-	if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
+	if (ioctl_download & ioctl_wr & tape_ioctl)
 		tape_size <= ioctl_addr + 25'd1;
 	if (recorder_wr)
 		tape_size <= {8'd0, recorder_size};
-	if (old_download & ~ioctl_download & (ioctl_index == 8'd1))
+	if (old_download & ~ioctl_download & tape_ioctl)
 		tape_rewind <= 1'b1;
 	if (tape_rewind_btn & ~old_rewind_btn)
 		tape_rewind <= 1'b1;
@@ -276,18 +280,19 @@ keyboard keyboard (
 );
 
 //////////////////////////////  TAPE OVERLAY  ////////////////////////////////
-wire [223:0] tape_status_word;
+wire [400:0] tape_status_word;
 wire        tape_status_req, tape_status_ack;
 wire [23:0] overlay_rgb;
 
 wire         tape_hint_show;
 wire   [4:0] tape_hint_len;
-wire [175:0] tape_hint_text;
+wire         tape_hint_two;
+wire [351:0] tape_hint_text;
 
 // What to type next while the deck is stopped (load, then start).
 tape_hint tape_hint(
 	.clk(clk_sys),
-	.wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+	.wr(recorder_wr | (ioctl_download & ioctl_wr & tape_ioctl)),
 	.rec(recorder_wr),
 	.addr({9'd0, tape_write_addr}),
 	.data(tape_write_data),
@@ -297,6 +302,7 @@ tape_hint tape_hint(
 	.ps2_key(ps2_key),
 	.show(tape_hint_show),
 	.len(tape_hint_len),
+	.two(tape_hint_two),
 	.text(tape_hint_text)
 );
 
@@ -309,6 +315,7 @@ tape_status tape_status (
 	.length  (tape_size),
 	.hint_show(tape_hint_show),
 	.hint_len(tape_hint_len),
+	.hint_two(tape_hint_two),
 	.hint_text(tape_hint_text),
 	.status  (tape_status_word),
 	.req     (tape_status_req),

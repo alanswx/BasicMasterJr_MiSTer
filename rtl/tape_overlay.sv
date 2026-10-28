@@ -25,6 +25,7 @@
 `define TH_RETURN 8'h01
 `define TH_SPACE  8'h02
 `define TH_PLAY   8'h03
+`define TH_NEWLINE 8'h0A   // hint text only: continue on the second line
 
 // tape_hint - what to type next, read from the tape's block headers.
 //
@@ -44,6 +45,9 @@
 //   between A and B              load B      TYPE E <ret> LOAD GALAXY <ret>
 //   at the end of the tape       start it    TYPE G 1000 <spc> / TYPE RUN <ret>
 //
+// A BASIC program that uses the graphics page needs CALL $E37E before its
+// LOAD; the hint then takes two lines: TYPE CALL $E37E <ret> / THEN LOAD WINE <ret>.
+//
 // The start hint goes away when its last key (Space or Return) is pressed.
 // After a recording the tape also sits at its end, so the start hint stays
 // off until the tape is rewound (which then shows the load hint).
@@ -59,11 +63,12 @@ module tape_hint (
   input  logic         playing,
   input  logic  [10:0] ps2_key,
   output logic         show,
-  output logic   [4:0] len,
-  output logic [175:0] text         // 22 characters, the first in [175:168]
+  output logic   [4:0] len,         // width of the wider line
+  output logic         two,         // a second line (CALL $E37E, then the load)
+  output logic [351:0] text         // 2 x 22 characters, the first in [351:344]
 );
   localparam logic [1:0] P_SEEK = 2'd0, P_HDR = 2'd1, P_SKIP = 2'd2;
-  localparam int SLOTS = 45;
+  localparam int SLOTS = 60;
 
   logic [1:0]  pstate;
   logic [3:0]  hidx;
@@ -76,21 +81,25 @@ module tape_hint (
   logic [15:0] a_addr, b_addr;
   logic [24:0] a_last, b_off;     // A's last block and B's first, as $01 offsets
   logic [24:0] z_last;            // the image's last block
+  logic        need_call;         // a BASIC block mentions $EFE0 (see below)
+  logic [39:0] tail;              // the last five BASIC text bytes
 
   wire  [7:0]  kind = hdr[0];
   wire  [47:0] hname = {hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7]};
+  wire  [7:0]  up = data >= 8'h61 && data <= 8'h7A ? data - 8'h20 : data;
   wire  [8:0]  size = hdr[11] != 8'd0 ? {1'b0, hdr[11]} : kind == 8'd0 ? 9'd0 : 9'd256;
 
   initial begin
     pstate = P_SEEK; hidx = 0; skip = 0; mark = 0;
     a_valid = 0; a_bin = 0; b_valid = 0; b_bin = 0;
     a_name = 0; b_name = 0; a_addr = 0; b_addr = 0; a_last = 0; b_off = 0; z_last = 0;
+    need_call = 0; tail = 0;
   end
 
   always_ff @(posedge clk) begin
     if (wr) begin
       if (addr == 25'd0) begin
-        a_valid <= 0; b_valid <= 0;
+        a_valid <= 0; b_valid <= 0; need_call <= 0; tail <= 0;
         pstate <= data == 8'h01 ? P_HDR : P_SEEK;
         hidx <= 0; mark <= 0;
       end else case (pstate)
@@ -118,6 +127,16 @@ module tape_hint (
         end
         P_SKIP: begin
           skip <= skip - 9'd1;
+          // BASIC text that switches to graphics ($EFE0 = 61408) needs
+          // CALL $E37E first: it moves the program from $0900, the first
+          // graphics page, up to $2100. Without it the program draws over
+          // its own text (SYNTAX ERROR or a crash). Holds for every BASIC
+          // tape we have whose instructions ask for the call, and none else.
+          if (kind == 8'h10) begin
+            tail <= {tail[31:0], up};
+            if ({tail[23:0], up} == "EFE0" || {tail[31:0], up} == "61408")
+              need_call <= 1;
+          end
           if (skip == 9'd1) pstate <= P_SEEK;
         end
         default: pstate <= P_SEEK;
@@ -156,6 +175,7 @@ module tape_hint (
   wire        prev_bin = load_b ? a_bin : 1'b0;        // BASIC after power-on
   wire [15:0] r_addr = b_valid ? b_addr : a_addr;
   wire        ld = load_a || load_b;
+  wire        call_step = ld && !t_bin && need_call;
 
   // Name length without trailing spaces.
   function automatic logic [2:0] name_len(input logic [47:0] n);
@@ -169,16 +189,19 @@ module tape_hint (
 
   // Every possible piece in fixed slots, with an include flag each; a
   // sequencer copies the included ones into `text`, one slot per clock.
-  logic [5:0]   sc_idx;
-  logic [4:0]   w;
-  logic [175:0] build;
+  logic [6:0]   sc_idx;
+  logic [5:0]   w, w1;
+  logic         nl;
+  logic [351:0] build;
   logic [7:0]   sc;
   logic         si;
   always_comb begin
     sc = 8'h20; si = 0;
     case (sc_idx)
-      0: begin sc = "T"; si = 1; end  1: begin sc = "Y"; si = 1; end
-      2: begin sc = "P"; si = 1; end  3: begin sc = "E"; si = 1; end
+      0: begin sc = "T"; si = 1; end
+      1: begin sc = "Y"; si = 1; end
+      2: begin sc = "P"; si = 1; end
+      3: begin sc = "E"; si = 1; end
       4: begin sc = " "; si = 1; end
       5: begin sc = "M"; si = ld && t_bin && !prev_bin; end
       6: begin sc = "O"; si = ld && t_bin && !prev_bin; end
@@ -190,50 +213,71 @@ module tape_hint (
       12: begin sc = " "; si = ld && !t_bin && prev_bin; end
       13: begin sc = `TH_RETURN; si = ld && !t_bin && prev_bin; end
       14: begin sc = " "; si = ld && !t_bin && prev_bin; end
-      15: begin sc = "L"; si = ld && t_bin; end
-      16: begin sc = " "; si = ld && t_bin; end
-      17: begin sc = "L"; si = ld && !t_bin; end
-      18: begin sc = "O"; si = ld && !t_bin; end
-      19: begin sc = "A"; si = ld && !t_bin; end
-      20: begin sc = "D"; si = ld && !t_bin; end
-      21: begin sc = " "; si = ld && !t_bin; end
-      22, 23, 24, 25, 26, 27: begin
-        sc = t_name[47 - 8 * (sc_idx - 22) -: 8];
-        si = ld && (sc_idx - 22) < nlen;
+      15: begin sc = "C"; si = call_step; end
+      16: begin sc = "A"; si = call_step; end
+      17: begin sc = "L"; si = call_step; end
+      18: begin sc = "L"; si = call_step; end
+      19: begin sc = " "; si = call_step; end
+      20: begin sc = "$"; si = call_step; end
+      21: begin sc = "E"; si = call_step; end
+      22: begin sc = "3"; si = call_step; end
+      23: begin sc = "7"; si = call_step; end
+      24: begin sc = "E"; si = call_step; end
+      25: begin sc = " "; si = call_step; end
+      26: begin sc = `TH_RETURN; si = call_step; end
+      27: begin sc = `TH_NEWLINE; si = call_step; end
+      28: begin sc = "T"; si = call_step; end
+      29: begin sc = "H"; si = call_step; end
+      30: begin sc = "E"; si = call_step; end
+      31: begin sc = "N"; si = call_step; end
+      32: begin sc = " "; si = call_step; end
+      33: begin sc = "L"; si = ld && t_bin; end
+      34: begin sc = " "; si = ld && t_bin; end
+      35: begin sc = "L"; si = ld && !t_bin; end
+      36: begin sc = "O"; si = ld && !t_bin; end
+      37: begin sc = "A"; si = ld && !t_bin; end
+      38: begin sc = "D"; si = ld && !t_bin; end
+      39: begin sc = " "; si = ld && !t_bin; end
+      40, 41, 42, 43, 44, 45: begin
+        sc = t_name[47 - 8 * (sc_idx - 40) -: 8];
+        si = ld && (sc_idx - 40) < nlen;
       end
-      28: begin sc = " "; si = ld; end
-      29: begin sc = t_bin ? `TH_SPACE : `TH_RETURN; si = ld; end
-      30: begin sc = "G"; si = !ld && run_bin; end
-      31: begin sc = " "; si = !ld && run_bin; end
-      32: begin sc = hex(r_addr[15:12]); si = !ld && run_bin; end
-      33: begin sc = hex(r_addr[11:8]);  si = !ld && run_bin; end
-      34: begin sc = hex(r_addr[7:4]);   si = !ld && run_bin; end
-      35: begin sc = hex(r_addr[3:0]);   si = !ld && run_bin; end
-      36: begin sc = "R"; si = !ld && !run_bin; end
-      37: begin sc = "U"; si = !ld && !run_bin; end
-      38: begin sc = "N"; si = !ld && !run_bin; end
-      39: begin sc = " "; si = !ld; end
-      40: begin sc = run_bin ? `TH_SPACE : `TH_RETURN; si = !ld; end
+      46: begin sc = " "; si = ld; end
+      47: begin sc = t_bin ? `TH_SPACE : `TH_RETURN; si = ld; end
+      48: begin sc = "G"; si = !ld && run_bin; end
+      49: begin sc = " "; si = !ld && run_bin; end
+      50: begin sc = hex(r_addr[15:12]); si = !ld && run_bin; end
+      51: begin sc = hex(r_addr[11:8]); si = !ld && run_bin; end
+      52: begin sc = hex(r_addr[7:4]); si = !ld && run_bin; end
+      53: begin sc = hex(r_addr[3:0]); si = !ld && run_bin; end
+      54: begin sc = "R"; si = !ld && !run_bin; end
+      55: begin sc = "U"; si = !ld && !run_bin; end
+      56: begin sc = "N"; si = !ld && !run_bin; end
+      57: begin sc = " "; si = !ld; end
+      58: begin sc = run_bin ? `TH_SPACE : `TH_RETURN; si = !ld; end
       default: ;
     endcase
   end
 
-  initial begin sc_idx = 0; w = 0; build = 0; show = 0; len = 0; text = 0; end
+  initial begin sc_idx = 0; w = 0; w1 = 0; nl = 0; build = 0; show = 0; len = 0; two = 0; text = 0; end
 
   always_ff @(posedge clk) begin
-    if (sc_idx == 6'(SLOTS - 1)) begin
+    if (sc_idx == 7'(SLOTS - 1)) begin
       text <= build;
-      len  <= w;
+      len  <= !nl ? w[4:0] : w1 > w - 6'd22 ? w1[4:0] : 5'(w - 6'd22);
+      two  <= nl;
       show <= want;
       sc_idx <= 0;
-      w <= 0;
-      build <= {22{8'h20}};
+      w <= 0; w1 <= 0; nl <= 0;
+      build <= {44{8'h20}};
     end else begin
-      if (si && w < 5'd22) begin
-        build[175 - 8 * w -: 8] <= sc;
-        w <= w + 5'd1;
+      if (si && sc == `TH_NEWLINE) begin
+        w1 <= w; nl <= 1; w <= 6'd22;
+      end else if (si && w < (nl ? 6'd44 : 6'd22)) begin
+        build[351 - 8 * w -: 8] <= sc;
+        w <= w + 6'd1;
       end
-      sc_idx <= sc_idx + 6'd1;
+      sc_idx <= sc_idx + 7'd1;
     end
   end
 endmodule
@@ -247,9 +291,10 @@ module tape_status (
   input  logic  [24:0] length,      // bytes on the tape
   input  logic         hint_show,   // from tape_hint
   input  logic   [4:0] hint_len,
-  input  logic [175:0] hint_text,
+  input  logic         hint_two,
+  input  logic [351:0] hint_text,
   // to the video clock
-  output logic [223:0] status,      // held while req != ack
+  output logic [400:0] status,      // held while req != ack
   output logic         req,
   input  logic         ack          // asynchronous; synchronised here
 );
@@ -282,7 +327,7 @@ module tape_status (
   endfunction
 
   wire [24:0] cell_bytes = length[24:6] == 0 ? 25'd1 : {6'd0, length[24:6]};
-  wire [223:0] pack = {hint_show, hint_len, hint_text, loaded, playing, fast, fill, elapsed, total};
+  wire [400:0] pack = {hint_two, hint_show, hint_len, hint_text, loaded, playing, fast, fill, elapsed, total};
 
   initial begin
     elapsed = 0; total = 0; frac = 0; last_pos = 0; last_len = 0;
@@ -329,7 +374,7 @@ module tape_overlay #(
   input  logic         ce_pix,
   input  logic         hblank, vblank,
   input  logic         enable,      // OSD Tape overlay: On
-  input  logic [223:0] status,      // from tape_status, stable while req != ack
+  input  logic [400:0] status,      // from tape_status, stable while req != ack
   input  logic         req,
   output logic         ack,
   input  logic  [23:0] rgb_in,
@@ -337,7 +382,7 @@ module tape_overlay #(
 );
   localparam int CHARS = 22;
   logic [1:0]   req_sync;
-  logic [223:0] shown;
+  logic [400:0] shown;
   logic [10:0]  x, width;
   logic [9:0]   y, height;
   logic         line_active, old_hblank, old_vblank;
@@ -364,9 +409,10 @@ module tape_overlay #(
     end
   end
 
-  wire         hint_show = shown[223];
-  wire [4:0]   hint_len = shown[222:218];
-  wire [175:0] hint_text = shown[217:42];
+  wire         hint_two = shown[400];
+  wire         hint_show = shown[399];
+  wire [4:0]   hint_len = shown[398:394];
+  wire [351:0] hint_text = shown[393:42];
   wire         tape_bar = enable && shown[41] && shown[40];   // loaded, playing
   wire         hint = enable && hint_show && !tape_bar;
   wire         visible = tape_bar || hint;
@@ -377,7 +423,7 @@ module tape_overlay #(
   wire         sx = width >= 11'd512, sy = height >= 10'd300;
   wire [4:0]   chars = tape_bar ? 5'(CHARS) : hint_len;
   wire [10:0]  box_w = {3'd0, chars, 3'd0} + 11'd4;
-  wire [9:0]   box_h = tape_bar ? 10'd18 : 10'd12;
+  wire [9:0]   box_h = tape_bar ? 10'd18 : hint_two ? 10'd22 : 10'd12;
   wire [10:0]  x0 = 11'd4;
   wire [9:0]   y0 = height - (sy ? {box_h[8:0], 1'b0} : box_h) - 10'd4;
   wire [10:0]  dx = x - x0;
@@ -386,15 +432,17 @@ module tape_overlay #(
   wire [9:0]   ly = sy ? {1'b0, dy[9:1]} : dy;
   wire         in_box = x >= x0 && y >= y0 && lx < box_w && ly < box_h;
 
-  // Text row at ly 2..9, x 2..: one character per 8 pixels.
+  // Text rows at ly 2..9 (and 12..19 for a two-line hint), x 2..: one
+  // character per 8 pixels.
   wire [10:0] tx = lx - 11'd2;
-  wire [9:0]  ty = ly - 10'd2;
+  wire        line2 = hint && hint_two && ly >= 10'd12;
+  wire [9:0]  ty = ly - (line2 ? 10'd12 : 10'd2);
 
   function automatic logic [7:0] digit(input logic [3:0] d, input logic blank_zero);
     return blank_zero && d == 0 ? 8'h20 : 8'h30 + {4'd0, d};
   endfunction
   function automatic logic [7:0] char_at(input logic [4:0] col);
-    if (!tape_bar) return hint_text[175 - 8 * col -: 8];
+    if (!tape_bar) return hint_text[351 - 8 * ({1'b0, col} + (line2 ? 6'd22 : 6'd0)) -: 8];
     case (col)
       5'd0: return "T";  5'd1: return "A";  5'd2: return "P";  5'd3: return "E";
       5'd5: return `TH_PLAY;
@@ -416,6 +464,7 @@ module tape_overlay #(
     case (c)
       `TH_RETURN: g = 64'h0002022262FE6020;
       `TH_SPACE:  g = 64'h00000000008282FE;
+      "$":        g = 64'h103C503814781000;   // the ROM's $ reads as #
       default:    g = 64'h4060707870604000;   // play
     endcase
     return g[63 - 8 * r -: 8];
@@ -450,7 +499,7 @@ module tape_overlay #(
     fi_d <= fi;
     fc_d <= fc;
     if (fetch_d)
-      row[fi_d] <= fc_d >= `TH_RETURN && fc_d <= `TH_PLAY ? special(fc_d, ty[2:0]) : font_q;
+      row[fi_d] <= (fc_d >= `TH_RETURN && fc_d <= `TH_PLAY) || fc_d == "$" ? special(fc_d, ty[2:0]) : font_q;
   end
 
   wire [4:0] col = tx[7:3];

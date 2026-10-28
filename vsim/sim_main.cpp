@@ -708,8 +708,13 @@ int main(int argc, char** argv, char** env)
 	top->tape_rewind_btn = 0;
 
 	if (!tape_image.empty()) {
-		printf("Loading tape image: %s\n", tape_image.c_str());
-		bus.QueueDownload(tape_image, 1, 1);
+		// Like Main (menu.cpp), put the extension's position in the OSD row's
+		// list ("FS1,BMTBINSAV") in bits 7:6 of the index: .bin arrives as $41.
+		std::string ext = tape_image.substr(tape_image.find_last_of('.') + 1);
+		for (auto& c : ext) c = toupper(c);
+		int ext_idx = ext == "BIN" ? 1 : ext == "SAV" ? 2 : 0;
+		printf("Loading tape image: %s (ioctl_index $%02X)\n", tape_image.c_str(), (ext_idx << 6) | 1);
+		bus.QueueDownload(tape_image, (ext_idx << 6) | 1, 1);
 	}
 
 	if (!headless) {

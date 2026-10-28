@@ -12,6 +12,7 @@ emulator guesswork:
 | **[MAME]** | MAME `src/mame/hitachi/bmjr.cpp` |
 | **[DOC]** | Vendor/reference documentation (系統図, magazine, Wikipedia, 旧コン研 system list) |
 | **[IO82]** | Original I/O magazine scans from March-May 1982 (see `ref/README.md`) |
+| **[CSP]** | Measured in the Common Source Code Project's `bmjr` VM (`vsim/csp/`) and checked on this core in vsim |
 
 Confidence is highest where **[SCH]** or **[ROM]** agrees with two independent emulators.
 
@@ -109,6 +110,16 @@ faking an overlay. The remaining research task is to trace the IC79/IC80 select 
 `$40/$4C` and determine whether it changes per frame, scanline, character, or some other
 interval. The CH32V203 BasicmasterEmulator instead ORs the two pattern bytes, which is useful
 independent evidence but not conclusive against the schematic. [SCH] [BM2] [IO82]
+
+**BASIC programs and graphics page 1 share memory.** By default, BASIC keeps program text
+from `$0900`, the start of graphics page 1. `CALL $E37E` (in the `$E000` printer ROM) moves
+it to `$2100`: in a RAM diff before and after the call, the BASIC pointers at `$74`, `$78`
+and `$8C` change from `$09xx` to `$21xx`. A program that switches to graphics without the
+call draws over its own text, which gives `SYNTAX ERROR` or "runs away". That's why
+magazine listings that use graphics say to run the call before typing or loading.
+Returning from the monitor with `E` resets the pointers, so the call has to come after
+any `MON` ... `E` round trip. Every BASIC tape we have whose instructions ask for the call
+writes `$EFE0` in its text, and no other tape does (25 tapes). [CSP] [DOC]
 
 ---
 

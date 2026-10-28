@@ -112,6 +112,9 @@ differences, all commented in the file:
   altsyncram settings** (port A, the CPU: one clock; port B, video and tape: two).
   When the sim gave port A one clock but the hardware gave two, 32x tape turbo
   passed every sim test and crashed the FPGA. Change both files together.
+* `--tape` sends the download with `ioctl_index` = (extension's position in
+  `BMTBINSAV`) × 64 + 1, as Main does, so `.bin` arrives as `$41`. The core matches
+  `ioctl_index[5:0]` only.
 * Tape images use the same dedicated 64 KiB dual-port RAM in both tops.
   `ioctl_wait` is therefore tied low; external SDRAM is not part of playback.
 

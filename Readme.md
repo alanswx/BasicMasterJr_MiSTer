@@ -101,8 +101,12 @@ to the end, until that last Space or Return is pressed. On a tape holding a
 machine-code file and then a BASIC one (Tiny Galaxy, MISSILE FIGHT) it shows
 `TYPE E ↵ LOAD GALAXY ↵` between the two. The start address is the first block's
 load address; the tape format has no start address, but that is right for every
-machine-code tape we have. A `CALL $E37E` some type-ins need first is not on the
-tape, so the hint can't show it.
+machine-code tape we have. A BASIC program that switches to the graphics screen
+(its text mentions `$EFE0`) needs `CALL $E37E` before it is loaded, and then the hint
+takes two lines: `TYPE CALL $E37E ↵` / `THEN LOAD WINE ↵`. The call moves BASIC's
+program area off graphics page 1. Returning from the monitor with `E` undoes it, so on a
+tape with a machine-code file first the hint shows `TYPE E ↵ CALL $E37E ↵` /
+`THEN LOAD GU ↵`.
 
 BASIC programs (saved as ASCII, extension `.S` in the tape header) load with BASIC's
 own `LOAD` instead of the monitor's `L`.

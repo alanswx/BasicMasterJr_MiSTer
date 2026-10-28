@@ -27,7 +27,30 @@ Verification:
   checksum-valid blocks and `$FF` padding to its 512-byte boundary. Not yet
   re-tested on hardware since the merge with Tape speed 32x.
 
-## Tape saving merged (2026-10-27)
+## After the merge: .bin tapes and CALL $E37E (2026-10-27)
+
+- **`.bin` tapes didn't load in the merged build (`3493c7c`).**
+  - Main puts the file's position in the row's extension list in `ioctl_index[7:6]`
+    (`menu.cpp:2673`). With `FS1,BMTBINSAV`, a `.bin` arrives as `$41`, and the core
+    compared the whole byte with 1, so the download was ignored.
+  - The recording commit was hardware-tested with a `.bmt`, which is first in the
+    list and still arrives as 1.
+  - Fix: `tape_ioctl = ioctl_index[5:0] == 1` in both tops. `vsim/sim_main.cpp` now
+    sends the extension bits as Main does, so the sim would catch this.
+- **CALL $E37E in the hint.**
+  - BASIC keeps its program at `$0900`, on graphics page 1, and the call moves it to
+    `$2100` (see `ref/notes/hardware-reference.md`, `$EFE0`). The monitor's `E`
+    undoes it.
+  - The hint parser scans BASIC text for `EFE0`/`61408`. When found, the BASIC load
+    step shows two lines, `TYPE E ↵ CALL $E37E ↵` / `THEN LOAD GU ↵`. The rule
+    matches the instructions of all 25 BASIC tapes we have: the 8 type-ins plus the
+    17 zasshi games from mister12.
+  - The overlay draws its own `$`, because the ROM's looks like `#`.
+- **009 GUNDAM:** a tester got `SYNTAX ERROR` after `S`.
+  - CSP gives the same error without the call, or with the call made before a
+    `MON`/`E` round trip.
+  - Following the new hint, the core in vsim reaches gameplay.
+
 
 `fork/tape-support` had a separate commit, `f603e6f` "Add native tape recording and
 MiSTer save support" (2026-07-28, built on `07d4afe`), that never reached this

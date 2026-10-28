@@ -373,6 +373,10 @@ wire tape_out;
 // the edge-triggered external SDRAM handshake and byte-lane hazards.
 assign ioctl_wait = 1'b0;
 
+// Main sends the file's position in the row's extension list (BMT, BIN, SAV)
+// in ioctl_index[7:6] (menu.cpp), so a .bin arrives as $41: match the slot only.
+wire tape_ioctl = ioctl_index[5:0] == 6'd1;
+
 // Latch how many bytes the tape image holds, so the player knows where the
 // tape ends instead of wrapping through stale buffer data. Rewind whenever a
 // new image is mounted (and say so: "Tape ready (rewound)") or on OSD Rewind
@@ -417,9 +421,9 @@ always @(posedge clk_sys) begin
   tape_info_req <= 1'b0;
   if (ioctl_download & ~old_download)
     tape_size <= 25'd0;
-  if (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))
+  if (ioctl_download & ioctl_wr & tape_ioctl)
     tape_size <= ioctl_addr + 25'd1;
-  if (old_download & ~ioctl_download & (ioctl_index == 8'd1)) begin
+  if (old_download & ~ioctl_download & tape_ioctl) begin
     tape_rewind <= 1'b1;
     tape_info_req <= 1'b1;
   end
@@ -531,7 +535,7 @@ ram tape_buffer(
   .addr(tape_buffer_write_addr),
   .din(tape_buffer_write_data),
   .dout(),
-  .wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+  .wr(recorder_wr | (ioctl_download & ioctl_wr & tape_ioctl)),
   .ce(1'b1),
   .addr_b(tape_buffer_addr),
   .dout_b(tape_buffer_data)
@@ -602,19 +606,20 @@ wire scandoubler = forced_scandoubler | (video_fx != 3'd0);
 assign VGA_SL = scanline_fx[1:0];
 
 // Tape status bar, between the machine's picture and video_mixer.
-wire [223:0] tape_status_word;
+wire [400:0] tape_status_word;
 wire        tape_status_req, tape_status_ack;
 wire [23:0] overlay_rgb;
 
 wire         tape_hint_show;
 wire   [4:0] tape_hint_len;
-wire [175:0] tape_hint_text;
+wire         tape_hint_two;
+wire [351:0] tape_hint_text;
 
 // What to type next while the deck is stopped (load, then start).
 // It watches the buffer's write port, so a recording updates it like a download.
 tape_hint tape_hint(
   .clk(clk_sys),
-  .wr(recorder_wr | (ioctl_download & ioctl_wr & (ioctl_index == 8'd1))),
+  .wr(recorder_wr | (ioctl_download & ioctl_wr & tape_ioctl)),
   .rec(recorder_wr),
   .addr({9'd0, tape_buffer_write_addr}),
   .data(tape_buffer_write_data),
@@ -624,6 +629,7 @@ tape_hint tape_hint(
   .ps2_key(ps2_key),
   .show(tape_hint_show),
   .len(tape_hint_len),
+  .two(tape_hint_two),
   .text(tape_hint_text)
 );
 
@@ -636,6 +642,7 @@ tape_status tape_status(
   .length(tape_size),
   .hint_show(tape_hint_show),
   .hint_len(tape_hint_len),
+  .hint_two(tape_hint_two),
   .hint_text(tape_hint_text),
   .status(tape_status_word),
   .req(tape_status_req),
